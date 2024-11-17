@@ -203,7 +203,7 @@ class MusicViewModel(
             } catch (e: Exception) {
                 e.printStackTrace()
                 _searchError.value = when {
-                    e.message?.contains("Unable to resolve host") == true -> "��络连接失败，请检查网络置"
+                    e.message?.contains("Unable to resolve host") == true -> "网络连接失败，请检查网络置"
                     e.message?.contains("timeout") == true -> "网络连接超时，请稍后重试"
                     e.message != null -> "搜索出错: ${e.message}"
                     else -> "网络连接失败，请检查网络设置"
