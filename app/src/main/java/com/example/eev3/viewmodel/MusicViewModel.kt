@@ -944,7 +944,7 @@ class MusicViewModel(
                     if (musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)) {
                         println("MusicViewModel: 使用缓存的音乐文件")
                         // 复制到下载目录
-                        println("MusicViewModel: 复制到下载目录")
+                        println("MusicViewModel: 复制到下��目录")
                         val cacheUri = musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC)
                         File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
                     } else {
@@ -1292,7 +1292,7 @@ class MusicViewModel(
                 loadPlayerData(playlist[nextIndex], currentPlaylistSource)
             }
             PlayMode.ONCE -> {
-                println("MusicViewModel: 单次播放模式，播放结束")
+                println("MusicViewModel: 单次播放模式，播放束")
             }
         }
     }
@@ -1343,6 +1343,11 @@ class MusicViewModel(
                         cacheFile
                     )
                 } else {
+                    // 显示开始缓存提示
+                    _downloadTip.value = DownloadTip(
+                        message = "正在准备 MV，由于文件较大，可能需要一些时间，请耐心等待..."
+                    )
+                    
                     println("MusicViewModel: 获取 MV 地址")
                     val mvUrl = musicCache.getMVUrl(songId)
                     println("MusicViewModel: 开始缓存 MV")
@@ -1389,8 +1394,13 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
-                println("MusicViewModel: 始下载 MV ${song.title}")
+                println("MusicViewModel: 开始下载 MV ${song.title}")
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
+                
+                // 显示开始下载提示
+                _downloadTip.value = DownloadTip(
+                    message = "开始下载 MV，由于文件较大，可能需要一些时间，请耐心等待..."
+                )
                 
                 withContext(Dispatchers.IO) {
                     val songId = song.url.substringAfterLast("/").substringBefore(".html")

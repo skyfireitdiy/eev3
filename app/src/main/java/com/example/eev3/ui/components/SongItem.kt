@@ -31,6 +31,7 @@ fun SongItem(
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    var showMVConfirmDialog by remember { mutableStateOf(false) }
     
     Surface(
         modifier = modifier
@@ -218,7 +219,16 @@ fun SongItem(
                     },
                     onClick = {
                         showMenu = false
-                        onDownloadMVClick()
+                        when (downloadStatus) {
+                            is DownloadStatus.Success -> {
+                                if (downloadStatus.hasMVDownloaded) {
+                                    showMVConfirmDialog = true
+                                } else {
+                                    onDownloadMVClick()
+                                }
+                            }
+                            else -> onDownloadMVClick()
+                        }
                     }
                 )
             }
@@ -243,6 +253,32 @@ fun SongItem(
                 dismissButton = {
                     TextButton(
                         onClick = { showConfirmDialog = false }
+                    ) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
+
+        // MV 重复下载确认对话框
+        if (showMVConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showMVConfirmDialog = false },
+                title = { Text("确认重新下载") },
+                text = { Text("该 MV 已经下载过了，是否要重新下载？") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showMVConfirmDialog = false
+                            onDownloadMVClick()
+                        }
+                    ) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showMVConfirmDialog = false }
                     ) {
                         Text("取消")
                     }
