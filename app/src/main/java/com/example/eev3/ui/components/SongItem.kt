@@ -1,6 +1,7 @@
 package com.example.eev3.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +24,7 @@ fun SongItem(
     onSongClick: () -> Unit,
     onFavoriteClick: () -> Unit,
     onDownloadClick: () -> Unit,
+    onPlayMVClick: () -> Unit = {},
     downloadStatus: DownloadStatus = DownloadStatus.NotStarted,
     modifier: Modifier = Modifier
 ) {
@@ -51,10 +53,29 @@ fun SongItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = song.song.title,
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = song.song.title,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    // 显示 MV 标记
+                    if (song.song.hasMV) {
+                        Text(
+                            text = "MV",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ChineseRed,
+                            modifier = Modifier
+                                .background(
+                                    color = ChineseRed.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 
                 // 修改状态显示逻辑
                 when (downloadStatus) {
@@ -150,6 +171,16 @@ fun SongItem(
                     }
                 }
             )
+            // 如果有 MV，添加播放 MV 菜单项
+            if (song.song.hasMV) {
+                DropdownMenuItem(
+                    text = { Text("播放 MV") },
+                    onClick = {
+                        showMenu = false
+                        onPlayMVClick()
+                    }
+                )
+            }
         }
 
         // 重复下载确认对话框

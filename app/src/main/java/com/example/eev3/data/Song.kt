@@ -7,7 +7,9 @@ import androidx.compose.runtime.setValue
 data class Song(
     val title: String,
     val url: String = "",
-    var isFavorite: Boolean = false
+    var isFavorite: Boolean = false,
+    val hasMV: Boolean = false,
+    val mvUrl: String = ""
 )
 
 class ObservableSong(

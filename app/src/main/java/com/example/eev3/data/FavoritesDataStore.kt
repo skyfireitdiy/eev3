@@ -25,7 +25,14 @@ class FavoritesDataStore(private val context: Context) {
         val favoritesJson = preferences[FAVORITES_KEY] ?: "[]"
         try {
             val type = object : TypeToken<List<Song>>() {}.type
-            gson.fromJson(favoritesJson, type)
+            val songs = gson.fromJson<List<Song>>(favoritesJson, type)
+            // 确保旧数据也有 hasMV 和 mvUrl 字段
+            songs.map { song ->
+                song.copy(
+                    hasMV = song.hasMV,
+                    mvUrl = song.mvUrl ?: ""  // 如果 mvUrl 为 null，使用空字符串
+                )
+            }
         } catch (e: Exception) {
             emptyList()
         }

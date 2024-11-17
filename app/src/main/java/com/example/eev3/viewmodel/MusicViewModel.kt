@@ -331,8 +331,21 @@ class MusicViewModel(
                             songPath.startsWith("/") -> "$BASE_URL$songPath"
                             else -> "$BASE_URL/$songPath"
                         }
+                        
+                        // 检查是否有 MV
+                        val mvElement = element.selectFirst(".mv a")
+                        val hasMV = mvElement != null
+                        val mvUrl = if (hasMV) {
+                            val mvPath = mvElement?.attr("href") ?: ""
+                            when {
+                                mvPath.startsWith("http") -> mvPath
+                                mvPath.startsWith("/") -> "$BASE_URL$mvPath"
+                                else -> "$BASE_URL/$mvPath"
+                            }
+                        } else ""
+                        
                         if (title.isNotEmpty() && songUrl.isNotEmpty()) {
-                            ObservableSong(Song(title, songUrl))
+                            ObservableSong(Song(title, songUrl, hasMV = hasMV, mvUrl = mvUrl))
                         } else null
                     }
                     
@@ -877,7 +890,7 @@ class MusicViewModel(
         }
     }
 
-    // 清���文件名中的非法字符
+    // 清文件名中的非法字符
     private fun sanitizeFileName(fileName: String): String {
         return fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
             .replace(Regex("\\s+"), "_")
@@ -1156,8 +1169,21 @@ class MusicViewModel(
                             songPath.startsWith("/") -> "$BASE_URL$songPath"
                             else -> "$BASE_URL/$songPath"
                         }
+                        
+                        // 检查是否有 MV
+                        val mvElement = element.selectFirst(".mv a")
+                        val hasMV = mvElement != null
+                        val mvUrl = if (hasMV) {
+                            val mvPath = mvElement?.attr("href") ?: ""
+                            when {
+                                mvPath.startsWith("http") -> mvPath
+                                mvPath.startsWith("/") -> "$BASE_URL$mvPath"
+                                else -> "$BASE_URL/$mvPath"
+                            }
+                        } else ""
+                        
                         if (title.isNotEmpty() && songUrl.isNotEmpty()) {
-                            ObservableSong(Song(title, songUrl))
+                            ObservableSong(Song(title, songUrl, hasMV = hasMV, mvUrl = mvUrl))
                         } else null
                     }
                     
@@ -1243,7 +1269,7 @@ class MusicViewModel(
                 }
             }
             PlayMode.SINGLE_LOOP -> {
-                println("MusicViewModel: 单曲循环，重新��放")
+                println("MusicViewModel: 单曲循环，重新播放")
                 exoPlayer?.seekTo(0)
                 exoPlayer?.play()
             }
