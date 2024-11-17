@@ -976,7 +976,7 @@ class MusicViewModel(
                 println("- 状态: 仅下载")
                 DownloadStatus.Success(downloadedFile.absolutePath, false)
             }
-            // 仅缓存在应用内
+            // 仅缓存在应���内
             isCached -> {
                 println("- 状态: 仅缓存")
                 DownloadStatus.Success(musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC), true)
@@ -1026,15 +1026,15 @@ class MusicViewModel(
                         .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                         .get()
                     
-                    // 解析总数和总页数
-                    val pageDataText = document.selectFirst(".pagedata")?.text() ?: ""
-                    val totalCountMatch = "共有(\\d+)首搜索结果".toRegex().find(pageDataText)
-                    val totalCount = totalCountMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                    rankTotalPages = (totalCount + 59) / 60 // 每页60首歌曲
-                    
-                    println("MusicViewModel: 榜单总数=$totalCount, 总页数=$rankTotalPages, 当前页=$page")
-                    
                     val songElements = document.select(".play_list ul li")
+                    
+                    // 如果没有找到音乐列表，说明已经到底了
+                    if (songElements.isEmpty()) {
+                        println("MusicViewModel: 未找到音乐列表，已到底")
+                        _rankReachedEnd.value = true
+                        return@withContext
+                    }
+                    
                     val songs = songElements.mapNotNull { element ->
                         val nameElement = element.selectFirst(".name a") ?: return@mapNotNull null
                         val title = nameElement.text()
@@ -1052,6 +1052,13 @@ class MusicViewModel(
                         } else null
                     }
                     
+                    // 如果解析出的歌曲为空，也认为是到底了
+                    if (songs.isEmpty()) {
+                        println("MusicViewModel: 解析结果为空，已到底")
+                        _rankReachedEnd.value = true
+                        return@withContext
+                    }
+                    
                     // 更新榜单数据
                     if (page == 1) {
                         _rankSongs.value = songs
@@ -1060,12 +1067,6 @@ class MusicViewModel(
                     }
                     
                     rankCurrentPage = page
-                    isRankLastPage = page >= rankTotalPages
-                    
-                    // 如果到达最后一页，显示提示
-                    if (isRankLastPage) {
-                        _rankReachedEnd.value = true
-                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1075,6 +1076,8 @@ class MusicViewModel(
                     e.message != null -> "加载失败: ${e.message}"
                     else -> "网络连接失败，请检查网络设置"
                 }
+                // 出错时也标记为到底，防止继续请求
+                _rankReachedEnd.value = true
             } finally {
                 isRankLoading = false
                 _rankLoadingMore.value = false
