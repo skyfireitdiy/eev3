@@ -217,7 +217,8 @@ class MusicCache(context: Context) {
         val musicSize = cacheDir.walkBottomUp().sumOf { it.length() }
         val lyricsSize = lyricsDir.walkBottomUp().sumOf { it.length() }
         val coverSize = coverDir.walkBottomUp().sumOf { it.length() }
-        musicSize + lyricsSize + coverSize
+        val mvSize = mvDir.walkBottomUp().sumOf { it.length() }
+        musicSize + lyricsSize + coverSize + mvSize
     }
     
     // 生成缓存文件名
@@ -278,6 +279,21 @@ class MusicCache(context: Context) {
                 println("MusicCache: 跳过封面: ${file.name}")
             } else {
                 println("MusicCache: 删除封面: ${file.name}")
+                file.delete()
+            }
+        }
+        
+        // 清除 MV 缓存
+        mvDir.listFiles()?.forEach { file ->
+            val shouldSkip = skipUrls.any { url ->
+                val songId = extractSongId(url)
+                file.name == "$songId.mp4"
+            }
+            
+            if (shouldSkip) {
+                println("MusicCache: 跳过 MV: ${file.name}")
+            } else {
+                println("MusicCache: 删除 MV: ${file.name}")
                 file.delete()
             }
         }
