@@ -7,6 +7,7 @@ import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
+import android.os.Environment
 
 class MusicCache(context: Context) {
     private val cacheDir = File(context.cacheDir, "music")
@@ -49,22 +50,110 @@ class MusicCache(context: Context) {
         return File(directory, fileName)
     }
     
-    // 检查是否已缓存
+    // 检查是否已缓存，增加检查下载文件
     fun isCached(url: String, type: CacheType): Boolean {
         val file = getCacheFile(url, type)
         val exists = file.exists()
+        
+        // 如果缓存不存在，检查是否已下载
+        if (!exists) {
+            val songTitle = extractSongTitle(url)
+            val downloadFile = when (type) {
+                CacheType.MUSIC -> File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "$songTitle.mp3")
+                CacheType.MV -> File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "$songTitle.mp4")
+                else -> null
+            }
+            
+            if (downloadFile?.exists() == true) {
+                println("MusicCache: 未找到缓存但找到下载文件: ${downloadFile.absolutePath}")
+                return true
+            }
+        }
+        
         println("MusicCache: 检查缓存 type=$type, exists=$exists, file=${file.absolutePath}")
         return exists
     }
     
-    // 获取缓存文件URI
+    // 获取缓存文件URI，增加返回下载文件
     fun getCacheFileUri(url: String, type: CacheType): String {
-        return getCacheFile(url, type).toURI().toString()
+        val file = getCacheFile(url, type)
+        if (file.exists()) {
+            return file.toURI().toString()
+        }
+        
+        // 如果缓存不存在，尝试使用下载文件
+        val songTitle = extractSongTitle(url)
+        val downloadFile = when (type) {
+            CacheType.MUSIC -> File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "$songTitle.mp3")
+            CacheType.MV -> File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "$songTitle.mp4")
+            else -> null
+        }
+        
+        if (downloadFile?.exists() == true) {
+            println("MusicCache: 使用下载文件作为缓存: ${downloadFile.absolutePath}")
+            return downloadFile.toURI().toString()
+        }
+        
+        return file.toURI().toString()
     }
     
     // 缓存音乐
     suspend fun cacheMusic(htmlUrl: String, audioUrl: String): String = withContext(Dispatchers.IO) {
-        cacheFile(htmlUrl, audioUrl, CacheType.MUSIC)
+        if (audioUrl.startsWith("file:")) {
+            println("MusicCache: 跳过缓存，已经是本地文件 url=$audioUrl")
+            return@withContext audioUrl
+        }
+        
+        val songId = extractSongId(htmlUrl)
+        val songTitle = extractSongTitle(htmlUrl)
+        val cacheFile = getCacheFile(htmlUrl, CacheType.MUSIC)
+        println("MusicCache: 开始缓存 type=MUSIC, songId=$songId")
+        println("MusicCache: 缓存文件路径=${cacheFile.absolutePath}")
+        
+        if (cacheFile.exists()) {
+            println("MusicCache: 文件已存在，直接返回缓存")
+            return@withContext cacheFile.toURI().toString()
+        }
+        
+        // 检查是否已下载
+        val downloadFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "$songTitle.mp3")
+        if (downloadFile.exists()) {
+            println("MusicCache: 发现已下载的文件，复制到缓存目录")
+            try {
+                downloadFile.copyTo(cacheFile, overwrite = true)
+                println("MusicCache: 复制成功，大小=${cacheFile.length()}")
+                return@withContext cacheFile.toURI().toString()
+            } catch (e: Exception) {
+                println("MusicCache: 复制已下载文件失败: ${e.message}")
+                // 复制失败时继续从网络下载
+            }
+        }
+        
+        try {
+            val request = Request.Builder()
+                .url(audioUrl)
+                .build()
+            
+            client.newCall(request).execute().use { response ->
+                response.body?.let { body ->
+                    println("MusicCache: 开始下载 type=MUSIC, contentLength=${body.contentLength()}")
+                    cacheFile.outputStream().use { output ->
+                        body.byteStream().use { input ->
+                            val bytesCopied = input.copyTo(output)
+                            println("MusicCache: 下载完成 type=MUSIC, bytesCopied=$bytesCopied")
+                        }
+                    }
+                }
+            }
+            
+            println("MusicCache: 缓存成功 type=MUSIC, size=${cacheFile.length()}")
+            cacheFile.toURI().toString()
+        } catch (e: Exception) {
+            println("MusicCache: 缓存失败 type=MUSIC, error=${e.message}")
+            e.printStackTrace()
+            cacheFile.delete()
+            audioUrl
+        }
     }
     
     // 缓存歌词
@@ -306,5 +395,51 @@ class MusicCache(context: Context) {
             cacheFile.delete()
             throw e
         }
+    }
+
+    // 从URL中提取歌曲标题
+    private fun extractSongTitle(url: String): String {
+        val songId = extractSongId(url)
+        
+        // 先尝试从缓存目录查找标题
+        val cachedTitle = findSongTitleById(songId)
+        if (cachedTitle != null) {
+            return sanitizeFileName(cachedTitle)
+        }
+        
+        // 如果找不到缓存的标题，尝试从下载目录查找匹配的文件
+        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val downloadedFiles = downloadDir.listFiles()?.filter { it.extension == "mp3" } ?: emptyList()
+        
+        // 遍历下载目录，查找包含 songId 的文件名
+        val matchingFile = downloadedFiles.find { file ->
+            val fileName = file.nameWithoutExtension
+            fileName.contains(songId, ignoreCase = true)
+        }
+        
+        return if (matchingFile != null) {
+            matchingFile.nameWithoutExtension
+        } else {
+            songId
+        }
+    }
+
+    // 根据ID查找歌曲标题
+    private fun findSongTitleById(songId: String): String? {
+        // 遍历缓存目录，查找对应的歌曲标题
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.name.startsWith(songId)) {
+                // 从缓存文件名中提取标题
+                return file.nameWithoutExtension
+            }
+        }
+        return null
+    }
+
+    // 清理文件名中的非法字符
+    private fun sanitizeFileName(fileName: String): String {
+        return fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), "_")
+            .trim()
     }
 } 
