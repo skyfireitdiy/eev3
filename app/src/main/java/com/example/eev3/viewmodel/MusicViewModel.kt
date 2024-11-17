@@ -111,9 +111,9 @@ class MusicViewModel(
         get() = when (currentPlaylistSource) {
             PlaylistSource.FAVORITES -> _favorites.value.map { it.song }
             PlaylistSource.SEARCH -> _searchResults.value.map { it.song }
-            PlaylistSource.NEW_RANK, 
-            PlaylistSource.TOP_RANK,
-            PlaylistSource.DJ_DANCE -> _rankSongs.value.map { it.song }
+            PlaylistSource.NEW_RANK -> _newRankSongs.value.map { it.song }
+            PlaylistSource.TOP_RANK -> _topRankSongs.value.map { it.song }
+            PlaylistSource.DJ_DANCE -> _djDanceSongs.value.map { it.song }
         }
 
     // 添加播放失败处理的状态
@@ -195,6 +195,46 @@ class MusicViewModel(
 
     // 添加 isLoading 变量
     private var isLoading = false
+
+    // 为每个榜单类型添加独立的状态
+    private val _newRankSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
+    val newRankSongs: StateFlow<List<ObservableSong>> = _newRankSongs
+
+    private val _topRankSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
+    val topRankSongs: StateFlow<List<ObservableSong>> = _topRankSongs
+
+    private val _djDanceSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
+    val djDanceSongs: StateFlow<List<ObservableSong>> = _djDanceSongs
+
+    // 每个榜单的加载状态
+    private val _newRankLoadingMore = MutableStateFlow(false)
+    val newRankLoadingMore: StateFlow<Boolean> = _newRankLoadingMore
+
+    private val _topRankLoadingMore = MutableStateFlow(false)
+    val topRankLoadingMore: StateFlow<Boolean> = _topRankLoadingMore
+
+    private val _djDanceLoadingMore = MutableStateFlow(false)
+    val djDanceLoadingMore: StateFlow<Boolean> = _djDanceLoadingMore
+
+    // 每个榜单的到底状态
+    private val _newRankReachedEnd = MutableStateFlow(false)
+    val newRankReachedEnd: StateFlow<Boolean> = _newRankReachedEnd
+
+    private val _topRankReachedEnd = MutableStateFlow(false)
+    val topRankReachedEnd: StateFlow<Boolean> = _topRankReachedEnd
+
+    private val _djDanceReachedEnd = MutableStateFlow(false)
+    val djDanceReachedEnd: StateFlow<Boolean> = _djDanceReachedEnd
+
+    // 每个榜单的当前页码
+    private var newRankCurrentPage = 1
+    private var topRankCurrentPage = 1
+    private var djDanceCurrentPage = 1
+
+    // 每个榜单的加载状态
+    private var isNewRankLoading = false
+    private var isTopRankLoading = false
+    private var isDjDanceLoading = false
 
     init {
         // 加载保存的收藏
@@ -374,10 +414,13 @@ class MusicViewModel(
         
         // 更新播放列表来源和索引
         currentPlaylistSource = source
-        currentPlayingIndex = currentPlaylist.indexOfFirst { it.url == song.url }
+        val playlist = currentPlaylist
+        currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
+        println("MusicViewModel: 当前播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        
         _currentPlayingSongState.value = song
         
-        // 如果是同一首歌，直接返回
+        // 如果是第一首歌，直接返回
         if (song == currentPlayingSong && _currentPlayerData.value != null) {
             println("MusicViewModel: 相同歌曲，直接返回")
             return
@@ -525,7 +568,7 @@ class MusicViewModel(
             .sortedBy { it.time }
     }
     
-    // 更新当前歌词位置
+    // 更新当前歌位置
     private fun updateCurrentLyric(position: Long) {
         val lyrics = _lyrics.value
         if (lyrics.isEmpty()) return
@@ -539,7 +582,7 @@ class MusicViewModel(
     fun initializePlayer(context: Context, audioUrl: String) {
         println("MusicViewModel: 初始化播放器 audioUrl=$audioUrl")
         
-        // 如果是同一个URL，只需要更新UI状态
+        // 如是同一个URL只需要更新UI状态
         if (audioUrl == currentAudioUrl && exoPlayer != null) {
             println("MusicViewModel: 相同URL，只更新UI状态")
             // 更新进度和时长
@@ -566,29 +609,7 @@ class MusicViewModel(
                         _duration.value = player.duration
                         player.play()  // 准备就绪后开始播放
                     } else if (state == Player.STATE_ENDED) {
-                        println("MusicViewModel: 播放结束，切换到下一首")
-                        // 播放结束时，根据播放模式播放下一首
-                        when (_playMode.value) {
-                            PlayMode.SEQUENCE -> {
-                                // 顺序播放，播放下一首
-                                val nextIndex = if (currentPlayingIndex + 1 >= currentPlaylist.size) 0 
-                                              else currentPlayingIndex + 1
-                                loadPlayerData(currentPlaylist[nextIndex], currentPlaylistSource)
-                            }
-                            PlayMode.SINGLE_LOOP -> {
-                                // 单曲循环，重新播放当前歌曲
-                                player.seekTo(0)
-                                player.play()
-                            }
-                            PlayMode.RANDOM -> {
-                                // 随机播放，随机选择一首
-                                val nextIndex = (0 until currentPlaylist.size).random()
-                                loadPlayerData(currentPlaylist[nextIndex], currentPlaylistSource)
-                            }
-                            PlayMode.ONCE -> {
-                                // 单次播放，不做任何操作
-                            }
-                        }
+                        handlePlaybackEnd()
                     }
                 }
                 
@@ -928,7 +949,7 @@ class MusicViewModel(
             } catch (e: Exception) {
                 println("MusicViewModel: 下载失败 error=${e.message}")
                 e.printStackTrace()
-                _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
+                _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "载失")) }
                 _downloadTip.value = DownloadTip(
                     message = "下载失败: ${e.message ?: "未知错误"}"
                 )
@@ -976,7 +997,7 @@ class MusicViewModel(
                 println("- 状态: 仅下载")
                 DownloadStatus.Success(downloadedFile.absolutePath, false)
             }
-            // 仅缓存在应���内
+            // 仅缓存在应用内
             isCached -> {
                 println("- 状态: 仅缓存")
                 DownloadStatus.Success(musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC), true)
@@ -989,19 +1010,84 @@ class MusicViewModel(
         }
     }
 
-    // 加载榜单数据
+    // 修改加载榜单数据的方法
     fun loadRankSongs(type: RankType, page: Int = 1) {
-        if (isRankLoading) return
-        isRankLoading = true
-        
-        // 如果是新的榜单类型或重新加载第一页，重置状态
-        if (type != currentRankType || page == 1) {
-            currentRankType = type
-            _rankSongs.value = emptyList()
-            _rankReachedEnd.value = false
-            rankCurrentPage = 1
+        // 根据类型选择对应的状态
+        when (type) {
+            RankType.NEW -> {
+                if (isNewRankLoading) return
+                isNewRankLoading = true
+                
+                if (page == 1) {
+                    _newRankSongs.value = emptyList()
+                    _newRankReachedEnd.value = false
+                }
+                
+                loadRankSongsInternal(
+                    type = type,
+                    page = page,
+                    songs = _newRankSongs,
+                    loadingMore = _newRankLoadingMore,
+                    reachedEnd = _newRankReachedEnd,
+                    currentPage = newRankCurrentPage,
+                    setCurrentPage = { newRankCurrentPage = it },
+                    setLoading = { isNewRankLoading = it }
+                )
+            }
+            RankType.TOP -> {
+                if (isTopRankLoading) return
+                isTopRankLoading = true
+                
+                if (page == 1) {
+                    _topRankSongs.value = emptyList()
+                    _topRankReachedEnd.value = false
+                }
+                
+                loadRankSongsInternal(
+                    type = type,
+                    page = page,
+                    songs = _topRankSongs,
+                    loadingMore = _topRankLoadingMore,
+                    reachedEnd = _topRankReachedEnd,
+                    currentPage = topRankCurrentPage,
+                    setCurrentPage = { topRankCurrentPage = it },
+                    setLoading = { isTopRankLoading = it }
+                )
+            }
+            RankType.DJ_DANCE -> {
+                if (isDjDanceLoading) return
+                isDjDanceLoading = true
+                
+                if (page == 1) {
+                    _djDanceSongs.value = emptyList()
+                    _djDanceReachedEnd.value = false
+                }
+                
+                loadRankSongsInternal(
+                    type = type,
+                    page = page,
+                    songs = _djDanceSongs,
+                    loadingMore = _djDanceLoadingMore,
+                    reachedEnd = _djDanceReachedEnd,
+                    currentPage = djDanceCurrentPage,
+                    setCurrentPage = { djDanceCurrentPage = it },
+                    setLoading = { isDjDanceLoading = it }
+                )
+            }
         }
-        
+    }
+
+    // 添加内部加载方法
+    private fun loadRankSongsInternal(
+        type: RankType,
+        page: Int,
+        songs: MutableStateFlow<List<ObservableSong>>,
+        loadingMore: MutableStateFlow<Boolean>,
+        reachedEnd: MutableStateFlow<Boolean>,
+        currentPage: Int,
+        setCurrentPage: (Int) -> Unit,
+        setLoading: (Boolean) -> Unit
+    ) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -1031,11 +1117,11 @@ class MusicViewModel(
                     // 如果没有找到音乐列表，说明已经到底了
                     if (songElements.isEmpty()) {
                         println("MusicViewModel: 未找到音乐列表，已到底")
-                        _rankReachedEnd.value = true
+                        reachedEnd.value = true
                         return@withContext
                     }
                     
-                    val songs = songElements.mapNotNull { element ->
+                    val parsedSongs = songElements.mapNotNull { element ->
                         val nameElement = element.selectFirst(".name a") ?: return@mapNotNull null
                         val title = nameElement.text()
                             .replace("&nbsp;", " ")
@@ -1053,20 +1139,21 @@ class MusicViewModel(
                     }
                     
                     // 如果解析出的歌曲为空，也认为是到底了
-                    if (songs.isEmpty()) {
+                    if (parsedSongs.isEmpty()) {
                         println("MusicViewModel: 解析结果为空，已到底")
-                        _rankReachedEnd.value = true
+                        reachedEnd.value = true
                         return@withContext
                     }
                     
-                    // 更新榜单数据
-                    if (page == 1) {
-                        _rankSongs.value = songs
+                    // 更新对应榜单的数据
+                    if (songs.value.isEmpty()) {
+                        songs.value = parsedSongs
                     } else {
-                        _rankSongs.value = _rankSongs.value + songs
+                        songs.value = songs.value + parsedSongs
                     }
-                    
-                    rankCurrentPage = page
+
+                    // 更新页码
+                    setCurrentPage(page)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1077,20 +1164,76 @@ class MusicViewModel(
                     else -> "网络连接失败，请检查网络设置"
                 }
                 // 出错时也标记为到底，防止继续请求
-                _rankReachedEnd.value = true
+                reachedEnd.value = true
             } finally {
-                isRankLoading = false
-                _rankLoadingMore.value = false
+                setLoading(false)
+                loadingMore.value = false
             }
         }
     }
 
-    // 加载更多榜单数据
-    fun loadMoreRank() {
-        currentRankType?.let { type ->
-            if (!isRankLoading && !isRankLastPage) {
-                _rankLoadingMore.value = true
-                loadRankSongs(type, rankCurrentPage + 1)
+    // 修改加载更多的方法
+    fun loadMoreRank(type: RankType) {
+        when (type) {
+            RankType.NEW -> {
+                if (!isNewRankLoading && !_newRankReachedEnd.value) {
+                    _newRankLoadingMore.value = true
+                    loadRankSongs(type, newRankCurrentPage + 1)
+                }
+            }
+            RankType.TOP -> {
+                if (!isTopRankLoading && !_topRankReachedEnd.value) {
+                    _topRankLoadingMore.value = true
+                    loadRankSongs(type, topRankCurrentPage + 1)
+                }
+            }
+            RankType.DJ_DANCE -> {
+                if (!isDjDanceLoading && !_djDanceReachedEnd.value) {
+                    _djDanceLoadingMore.value = true
+                    loadRankSongs(type, djDanceCurrentPage + 1)
+                }
+            }
+        }
+    }
+
+    // 修改播放结束时的处理
+    private fun handlePlaybackEnd() {
+        println("MusicViewModel: 播放结束，切换到下一首")
+        val playlist = currentPlaylist
+        if (playlist.isEmpty()) {
+            println("MusicViewModel: 播放列表为空，停止播放")
+            return
+        }
+        
+        println("MusicViewModel: 当前播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        
+        when (_playMode.value) {
+            PlayMode.SEQUENCE -> {
+                // 顺序播放，播放下一首
+                if (currentPlayingIndex >= 0 && currentPlayingIndex < playlist.size) {
+                    val nextIndex = if (currentPlayingIndex + 1 >= playlist.size) 0 
+                                  else currentPlayingIndex + 1
+                    println("MusicViewModel: 顺序播放下一首，当前索引=$currentPlayingIndex, 下一首索引=$nextIndex")
+                    loadPlayerData(playlist[nextIndex], currentPlaylistSource)
+                } else {
+                    println("MusicViewModel: 当前索引无效: $currentPlayingIndex")
+                }
+            }
+            PlayMode.SINGLE_LOOP -> {
+                // 单曲循环，重新播放当前歌曲
+                println("MusicViewModel: 单曲循环，重新播放")
+                exoPlayer?.seekTo(0)
+                exoPlayer?.play()
+            }
+            PlayMode.RANDOM -> {
+                // 随机播放，随机选择一首
+                val nextIndex = (0 until playlist.size).random()
+                println("MusicViewModel: 随机播放，选择索引=$nextIndex")
+                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
+            }
+            PlayMode.ONCE -> {
+                // 单次播放，不做任何操作
+                println("MusicViewModel: 单次播放模式，播放结束")
             }
         }
     }

@@ -70,10 +70,17 @@ fun MusicPlayerApp(
     
     val snackbarHostState = remember { SnackbarHostState() }
     
+    // 添加记录进入播放页面前的页面索引
+    var lastPageBeforePlayer by remember { mutableStateOf(0) }
+    
     // 处理返回键
     BackHandler(enabled = showPlayer) {
         showPlayer = false
         viewModel.onPlayerVisibilityChanged(false)
+        // 返回到之前的页面
+        coroutineScope.launch {
+            pagerState.scrollToPage(lastPageBeforePlayer)
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -183,6 +190,7 @@ fun MusicPlayerApp(
                                             SongItem(
                                                 song = song,
                                                 onSongClick = {
+                                                    lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
                                                     currentSong = song.song
                                                     viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.FAVORITES)
                                                     showPlayer = true
@@ -226,6 +234,7 @@ fun MusicPlayerApp(
                                                 SongItem(
                                                     song = song,
                                                     onSongClick = {
+                                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
                                                         currentSong = song.song
                                                         viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.SEARCH)
                                                         showPlayer = true
@@ -281,11 +290,12 @@ fun MusicPlayerApp(
                                     viewModel.loadRankSongs(MusicViewModel.RankType.NEW)
                                 }
                                 RankListPage(
-                                    songs = rankSongs,
-                                    loadingMore = rankLoadingMore,
-                                    reachedEnd = rankReachedEnd,
-                                    onLoadMore = { viewModel.loadMoreRank() },
+                                    songs = viewModel.newRankSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                    loadingMore = viewModel.newRankLoadingMore.collectAsStateWithLifecycle().value,
+                                    reachedEnd = viewModel.newRankReachedEnd.collectAsStateWithLifecycle().value,
+                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.NEW) },
                                     onSongClick = { song ->
+                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
                                         currentSong = song.song
                                         viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.NEW_RANK)
                                         showPlayer = true
@@ -301,11 +311,12 @@ fun MusicPlayerApp(
                                     viewModel.loadRankSongs(MusicViewModel.RankType.TOP)
                                 }
                                 RankListPage(
-                                    songs = rankSongs,
-                                    loadingMore = rankLoadingMore,
-                                    reachedEnd = rankReachedEnd,
-                                    onLoadMore = { viewModel.loadMoreRank() },
+                                    songs = viewModel.topRankSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                    loadingMore = viewModel.topRankLoadingMore.collectAsStateWithLifecycle().value,
+                                    reachedEnd = viewModel.topRankReachedEnd.collectAsStateWithLifecycle().value,
+                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.TOP) },
                                     onSongClick = { song ->
+                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
                                         currentSong = song.song
                                         viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.TOP_RANK)
                                         showPlayer = true
@@ -321,11 +332,12 @@ fun MusicPlayerApp(
                                     viewModel.loadRankSongs(MusicViewModel.RankType.DJ_DANCE)
                                 }
                                 RankListPage(
-                                    songs = rankSongs,
-                                    loadingMore = rankLoadingMore,
-                                    reachedEnd = rankReachedEnd,
-                                    onLoadMore = { viewModel.loadMoreRank() },
+                                    songs = viewModel.djDanceSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                    loadingMore = viewModel.djDanceLoadingMore.collectAsStateWithLifecycle().value,
+                                    reachedEnd = viewModel.djDanceReachedEnd.collectAsStateWithLifecycle().value,
+                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.DJ_DANCE) },
                                     onSongClick = { song ->
+                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
                                         currentSong = song.song
                                         viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.DJ_DANCE)
                                         showPlayer = true
