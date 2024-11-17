@@ -385,7 +385,7 @@ class MusicViewModel(
                                     
                                     // 初始化播放器
                                     withContext(Dispatchers.Main) {
-                                        println("MusicViewModel: 使用新下载的音乐初始化播放器")
+                                        println("MusicViewModel: 使用新下���的音乐初始化播放器")
                                         initializePlayer(context, finalUrl)
                                     }
                                 }
@@ -560,7 +560,7 @@ class MusicViewModel(
         exoPlayer?.repeatMode = when (_playMode.value) {
             PlayMode.SEQUENCE -> Player.REPEAT_MODE_ALL
             PlayMode.SINGLE_LOOP -> Player.REPEAT_MODE_ONE
-            PlayMode.RANDOM -> Player.REPEAT_MODE_ALL  // 随机模式下也设置为循环全部
+            PlayMode.RANDOM -> Player.REPEAT_MODE_ALL  // 随机模式下也设置��循环全部
             PlayMode.ONCE -> Player.REPEAT_MODE_OFF
         }
         
@@ -678,10 +678,36 @@ class MusicViewModel(
 
     fun clearCache() {
         viewModelScope.launch {
-            musicCache.clearCache()
-            // 清除缓存后立即更新缓存大小显示
-            updateCacheSize()
-            dismissClearCacheDialog()
+            try {
+                // 获取当前播放歌曲的URL
+                val currentSongUrl = currentPlayingSong?.url
+                
+                if (currentSongUrl != null) {
+                    println("MusicViewModel: 清除缓存时保护当前播���歌曲: ${currentPlayingSong?.title}")
+                }
+                
+                // 清除缓存时跳过当前播放的音乐
+                musicCache.clearCache(skipUrls = listOfNotNull(currentSongUrl))
+                
+                // 清除缓存后立即更新缓存大小显示
+                updateCacheSize()
+                dismissClearCacheDialog()
+                
+                // 显示提示
+                _downloadTip.value = DownloadTip(
+                    message = if (currentSongUrl != null) {
+                        "已清除缓存（保留当前播放歌曲）"
+                    } else {
+                        "已清除全部缓存"
+                    }
+                )
+            } catch (e: Exception) {
+                println("MusicViewModel: 清除缓存失败: ${e.message}")
+                e.printStackTrace()
+                _downloadTip.value = DownloadTip(
+                    message = "清除缓存失败: ${e.message ?: "未知错误"}"
+                )
+            }
         }
     }
 

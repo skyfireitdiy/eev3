@@ -125,14 +125,68 @@ class MusicCache(context: Context) {
         musicSize + lyricsSize + coverSize
     }
     
+    // 生成缓存文件名
+    private fun generateCacheFileName(url: String, type: CacheType): String {
+        val songId = extractSongId(url)
+        return when (type) {
+            CacheType.MUSIC -> "$songId.mp3"
+            CacheType.LYRICS -> "$songId.lrc"
+            CacheType.COVER -> "$songId.jpg"
+        }
+    }
+    
     // 清除缓存
-    suspend fun clearCache() = withContext(Dispatchers.IO) {
-        cacheDir.deleteRecursively()
-        lyricsDir.deleteRecursively()
-        coverDir.deleteRecursively()
-        cacheDir.mkdirs()
-        lyricsDir.mkdirs()
-        coverDir.mkdirs()
+    suspend fun clearCache(skipUrls: List<String> = emptyList()) = withContext(Dispatchers.IO) {
+        println("MusicCache: 开始清除缓存")
+        println("MusicCache: 跳过的URL数量: ${skipUrls.size}")
+        
+        // 清除音乐缓存
+        cacheDir.listFiles()?.forEach { file ->
+            // 检查是否需要跳过该文件
+            val shouldSkip = skipUrls.any { url ->
+                val fileName = generateCacheFileName(url, CacheType.MUSIC)
+                file.name == fileName
+            }
+            
+            if (shouldSkip) {
+                println("MusicCache: 跳过文件: ${file.name}")
+            } else {
+                println("MusicCache: 删除文件: ${file.name}")
+                file.delete()
+            }
+        }
+        
+        // 清除歌词缓存
+        lyricsDir.listFiles()?.forEach { file ->
+            val shouldSkip = skipUrls.any { url ->
+                val fileName = generateCacheFileName(url, CacheType.LYRICS)
+                file.name == fileName
+            }
+            
+            if (shouldSkip) {
+                println("MusicCache: 跳过歌词: ${file.name}")
+            } else {
+                println("MusicCache: 删除歌词: ${file.name}")
+                file.delete()
+            }
+        }
+        
+        // 清除封面缓存
+        coverDir.listFiles()?.forEach { file ->
+            val shouldSkip = skipUrls.any { url ->
+                val fileName = generateCacheFileName(url, CacheType.COVER)
+                file.name == fileName
+            }
+            
+            if (shouldSkip) {
+                println("MusicCache: 跳过封面: ${file.name}")
+            } else {
+                println("MusicCache: 删除封面: ${file.name}")
+                file.delete()
+            }
+        }
+        
+        println("MusicCache: 缓存清除完成")
     }
     
     enum class CacheType {
