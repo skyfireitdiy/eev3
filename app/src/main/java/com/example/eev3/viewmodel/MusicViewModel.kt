@@ -276,7 +276,7 @@ class MusicViewModel(
         headsetReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
-                    // 耳机断开时暂停播放
+                    // 耳机断开暂停播放
                     exoPlayer?.pause()
                 }
             }
@@ -518,8 +518,68 @@ class MusicViewModel(
                             }
                         }
                     } else {
-                        // 如果未下载，走原有的缓存和下载逻辑
-                        // ... 原有的代码保持不变 ...
+                        // 如果未下载，走原有缓存和下载逻辑
+                        println("MusicViewModel: 从服务器获取数据")
+                        val formBody = FormBody.Builder()
+                            .add("id", songId)
+                            .add("type", "music")
+                            .build()
+                        
+                        val request = Request.Builder()
+                            .url("$BASE_URL/js/play.php")
+                            .post(formBody)
+                            .build()
+                        
+                        client.newCall(request).execute().use { response ->
+                            val responseBody = response.body?.string()
+                            if (responseBody != null) {
+                                val playResponse = gson.fromJson(responseBody, PlayResponse::class.java)
+                                if (playResponse.msg == 1) {
+                                    println("MusicViewModel: 开始缓存音乐")
+                                    val audioUrl = playResponse.url
+                                    val finalUrl = musicCache.cacheMusic(song.url, audioUrl)
+                                    println("MusicViewModel: 音乐缓存完成 finalUrl=$finalUrl")
+                                    
+                                    // 更新缓存大小显示
+                                    updateCacheSize()
+                                    
+                                    println("MusicViewModel: 开始缓存封面")
+                                    val coverUri = musicCache.cacheCover(song.url, playResponse.pic)
+                                    println("MusicViewModel: 封面缓存完成 coverUri=$coverUri")
+                                    
+                                    println("MusicViewModel: 开始获取歌词")
+                                    val lrcUrl = "$BASE_URL/plug/down.php?ac=music&lk=lrc&id=$songId"
+                                    val lrcRequest = Request.Builder()
+                                        .url(lrcUrl)
+                                        .build()
+                                    
+                                    client.newCall(lrcRequest).execute().use { lrcResponse ->
+                                        val lrcContent = lrcResponse.body?.string() ?: ""
+                                        println("MusicViewModel: 开始缓存歌词")
+                                        val lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
+                                        println("MusicViewModel: 歌词缓存完成 lyricsUri=$lyricsUri")
+                                        _lyrics.value = parseLyrics(lrcContent)
+                                        println("MusicViewModel: 歌词解析完成，行数=${_lyrics.value.size}")
+                                    }
+                                    
+                                    println("MusicViewModel: 更新缓存大小显示")
+                                    updateCacheSize()
+                                    
+                                    println("MusicViewModel: 所有内容缓存完成，开始播放")
+                                    _currentPlayerData.value = PlayerData(
+                                        coverImage = coverUri,
+                                        title = playResponse.title.replace("[Mp3_Lrc]", "").trim(),
+                                        audioUrl = finalUrl
+                                    )
+                                    
+                                    // 立即启动服务
+                                    withContext(Dispatchers.Main) {
+                                        println("MusicViewModel: 更新播放数据后启动服务")
+                                        initializePlayer(context, finalUrl)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -831,7 +891,7 @@ class MusicViewModel(
                     message = if (currentSongUrl != null) {
                         "已清除缓存（保留当前播放歌曲）"
                     } else {
-                        "已清除全部缓存"
+                        "已清除全部缓"
                     }
                 )
             } catch (e: Exception) {
@@ -865,30 +925,31 @@ class MusicViewModel(
     fun downloadSong(song: Song) {
         viewModelScope.launch {
             try {
-                println("MusicViewModel: 开始下载歌曲 ${song.title}")
-                // 更新下载状态为下载中
+                println("MusicViewModel: 开始下载 ${song.title}")
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 withContext(Dispatchers.IO) {
-                    val songId = song.url.substringAfterLast("/").substringBefore(".html")
-                    val hasCachedMusic = musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)
+                    val songId = song.url.substringAfterLast("/")
+                        .substringBefore(".html")
                     
                     // 获取下载目录
                     val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
                     downloadDir.mkdirs()
                     
-                    // 准备目文件名（使用歌曲标题）
+                    // 准备目标文件名
                     val sanitizedTitle = sanitizeFileName(song.title)
                     val targetFile = File(downloadDir, "$sanitizedTitle.mp3")
                     
-                    if (hasCachedMusic) {
-                        println("MusicViewModel: 使用缓存文件")
-                        // 如果已缓存，直接复制文件
-                        val cacheFile = File(URI(musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC)))
-                        cacheFile.copyTo(targetFile, overwrite = true)
+                    // 检查是否已缓存
+                    if (musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)) {
+                        println("MusicViewModel: 使用缓存的音乐文件")
+                        // 复制到下载目录
+                        println("MusicViewModel: 复制到下载目录")
+                        val cacheUri = musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC)
+                        File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
                     } else {
                         println("MusicViewModel: 从服务器下载")
-                        // 如果没有缓存，先获取音乐URL
+                        // 获取音乐真实地址并下载
                         val formBody = FormBody.Builder()
                             .add("id", songId)
                             .add("type", "music")
@@ -903,22 +964,18 @@ class MusicViewModel(
                             val responseBody = response.body?.string()
                             if (responseBody != null) {
                                 val playResponse = gson.fromJson(responseBody, PlayResponse::class.java)
-                                if (playResponse.msg == 1 && playResponse.url.isNotEmpty()) {
-                                    // 先缓存
+                                if (playResponse.msg == 1) {
                                     println("MusicViewModel: 开始缓存音乐")
                                     val audioUrl = playResponse.url
-                                    val cachedUrl = musicCache.cacheMusic(song.url, audioUrl)
+                                    val cacheUri = musicCache.cacheMusic(song.url, audioUrl)
                                     println("MusicViewModel: 音乐缓存完成")
                                     
-                                    // 更新缓存大小显示
+                                    // 更新缓存大小
                                     updateCacheSize()
                                     
                                     // 复制到下载目录
                                     println("MusicViewModel: 复制到下载目录")
-                                    val cacheFile = File(URI(cachedUrl))
-                                    cacheFile.copyTo(targetFile, overwrite = true)
-                                } else {
-                                    throw Exception("获取音乐URL失败")
+                                    File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
                                 }
                             }
                         }
@@ -935,8 +992,13 @@ class MusicViewModel(
                             null
                         )
                         
-                        // 更新下载状态为成功，注意这里 isCached 设置为 false，因为这是下载状态
-                        _downloadStatus.update { it + (song.url to DownloadStatus.Success(targetFile.absolutePath, false)) }
+                        // 更新下载状态
+                        _downloadStatus.update { 
+                            it + (song.url to DownloadStatus.Success(
+                                path = targetFile.absolutePath,
+                                isCached = true
+                            ))
+                        }
                         
                         _downloadTip.value = DownloadTip(
                             message = "下载完成",
@@ -949,7 +1011,7 @@ class MusicViewModel(
             } catch (e: Exception) {
                 println("MusicViewModel: 下载失败 error=${e.message}")
                 e.printStackTrace()
-                _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "载失")) }
+                _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
                 _downloadTip.value = DownloadTip(
                     message = "下载失败: ${e.message ?: "未知错误"}"
                 )
@@ -1243,6 +1305,33 @@ class MusicViewModel(
             try {
                 _mvCaching.value = true
                 val songId = song.url.substringAfterLast("/").substringBefore(".html")
+                val sanitizedTitle = sanitizeFileName(song.title)
+                
+                // 检查是否已下载
+                val downloadedFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "$sanitizedTitle.mp4")
+                if (downloadedFile.exists()) {
+                    println("MusicViewModel: 使用已下载的 MV")
+                    val mvUri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        downloadedFile
+                    )
+                    
+                    // 使用系统播放器播放
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(mvUri, "video/mp4")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    
+                    // 显示提示
+                    _downloadTip.value = DownloadTip(
+                        message = "正在播放已下载的 MV"
+                    )
+                    
+                    // 启动播放器
+                    context.startActivity(intent)
+                    return@launch
+                }
                 
                 // 检查是否已缓存
                 val cacheFile = File(context.cacheDir, "mv/$songId.mp4")
@@ -1258,6 +1347,10 @@ class MusicViewModel(
                     val mvUrl = musicCache.getMVUrl(songId)
                     println("MusicViewModel: 开始缓存 MV")
                     val cacheUri = musicCache.cacheMV(songId, mvUrl)
+                    
+                    // 更新缓存大小
+                    updateCacheSize()
+                    
                     FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.fileprovider",
@@ -1296,7 +1389,7 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
-                println("MusicViewModel: 开始下载 MV ${song.title}")
+                println("MusicViewModel: 始下载 MV ${song.title}")
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 withContext(Dispatchers.IO) {
@@ -1327,6 +1420,9 @@ class MusicViewModel(
                         val cacheUri = musicCache.cacheMV(songId, mvUrl)
                         println("MusicViewModel: MV 缓存完成")
                         
+                        // 更新缓存大小
+                        updateCacheSize()
+                        
                         // 复制到下载目录
                         println("MusicViewModel: 复制到下载目录")
                         File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
@@ -1352,6 +1448,9 @@ class MusicViewModel(
                                 hasMVDownloaded = true
                             ))
                         }
+                        
+                        // 更新缓存大小
+                        updateCacheSize()
                         
                         _downloadTip.value = DownloadTip(
                             message = "MV 下载完成",

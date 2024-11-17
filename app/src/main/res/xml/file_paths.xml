@@ -3,4 +3,10 @@
     <cache-path
         name="mv_cache"
         path="mv/"/>
+    <external-path
+        name="external_movies"
+        path="Movies/"/>
+    <external-path
+        name="external_music"
+        path="Music/"/>
 </paths> 
