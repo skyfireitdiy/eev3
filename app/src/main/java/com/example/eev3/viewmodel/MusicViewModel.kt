@@ -335,13 +335,6 @@ class MusicViewModel(
                                     val finalCoverUrl = musicCache.cacheCover(song.url, coverUrl)
                                     println("MusicViewModel: 封面缓存完成 finalCoverUrl=$finalCoverUrl")
                                     
-                                    // 更新播放器数据
-                                    _currentPlayerData.value = PlayerData(
-                                        coverImage = finalCoverUrl,
-                                        title = playResponse.title.replace("[Mp3_Lrc]", "").trim(),
-                                        audioUrl = finalUrl
-                                    )
-                                    
                                     println("MusicViewModel: 开始获取歌词")
                                     // 获取并缓存歌词
                                     val lrcUrl = "$BASE_URL/plug/down.php?ac=music&lk=lrc&id=$songId"
@@ -349,15 +342,28 @@ class MusicViewModel(
                                         .url(lrcUrl)
                                         .build()
                                     
+                                    var lyricsUri: String? = null
                                     client.newCall(lrcRequest).execute().use { lrcResponse ->
                                         val lrcContent = lrcResponse.body?.string() ?: ""
                                         println("MusicViewModel: 开始缓存歌词")
                                         // 缓存歌词
-                                        val lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
+                                        lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
                                         println("MusicViewModel: 歌词缓存完成 lyricsUri=$lyricsUri")
                                         _lyrics.value = parseLyrics(lrcContent)
                                         println("MusicViewModel: 歌词解析完成，行数=${_lyrics.value.size}")
                                     }
+                                    
+                                    // 更新缓存大小显示
+                                    println("MusicViewModel: 更新缓存大小显示")
+                                    updateCacheSize()
+                                    
+                                    // 所有内容都缓存完成后，再更新播放器数据并开始播放
+                                    println("MusicViewModel: 所有内容缓存完成，开始播放")
+                                    _currentPlayerData.value = PlayerData(
+                                        coverImage = finalCoverUrl,
+                                        title = playResponse.title.replace("[Mp3_Lrc]", "").trim(),
+                                        audioUrl = finalUrl
+                                    )
                                     
                                     // 初始化播放器
                                     withContext(Dispatchers.Main) {
@@ -633,7 +639,14 @@ class MusicViewModel(
 
     fun updateCacheSize() {
         viewModelScope.launch {
-            _cacheSize.value = musicCache.getCacheSize()
+            try {
+                val size = musicCache.getCacheSize()
+                println("MusicViewModel: 当前缓存大小: ${formatCacheSize(size)}")
+                _cacheSize.value = size
+            } catch (e: Exception) {
+                println("MusicViewModel: 更新缓存大小失败: ${e.message}")
+                e.printStackTrace()
+            }
         }
     }
 
