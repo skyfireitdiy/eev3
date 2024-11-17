@@ -644,7 +644,7 @@ class MusicViewModel(
 
     fun onPlayerVisibilityChanged(visible: Boolean) {
         if (!visible) {
-            // 界面隐藏时，保存当前状态但不停止播放
+            // 界面隐藏时，保当前状态但不停止播放
             shouldResumePlayback = exoPlayer?.isPlaying ?: false
             lastPosition = exoPlayer?.currentPosition ?: 0
         } else {
@@ -707,7 +707,7 @@ class MusicViewModel(
         viewModelScope.launch {
             try {
                 println("MusicViewModel: 开始下载歌曲 ${song.title}")
-                // 更新下载状态
+                // 更新下载状态为下载中
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 withContext(Dispatchers.IO) {
@@ -776,8 +776,8 @@ class MusicViewModel(
                             null
                         )
                         
-                        // 更新下载状态为成功
-                        _downloadStatus.update { it + (song.url to DownloadStatus.Success(targetFile.absolutePath)) }
+                        // 更新下载状态为成功，注意这里 isCached 设置为 false，因为这是下载状态
+                        _downloadStatus.update { it + (song.url to DownloadStatus.Success(targetFile.absolutePath, false)) }
                         
                         _downloadTip.value = DownloadTip(
                             message = "下载完成",
@@ -801,5 +801,53 @@ class MusicViewModel(
     // 清除提示
     fun clearDownloadTip() {
         _downloadTip.value = null
+    }
+
+    // 修改 checkSongStatus 方法
+    fun checkSongStatus(song: Song): DownloadStatus {
+        // 检查是否已下载到外部存储
+        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+        val sanitizedTitle = sanitizeFileName(song.title)
+        val downloadedFile = File(downloadDir, "$sanitizedTitle.mp3")
+        
+        // 检查是否已缓存
+        val isCached = musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)
+        
+        // 检查是否正在下载
+        val isDownloading = _downloadStatus.value[song.url] is DownloadStatus.Downloading
+        
+        println("CheckSongStatus for ${song.title}:")
+        println("- 下载文件存在: ${downloadedFile.exists()}")
+        println("- 下载文件路径: ${downloadedFile.absolutePath}")
+        println("- 应用内已缓存: $isCached")
+        println("- 正在下载中: $isDownloading")
+        
+        return when {
+            // 正在下载中
+            isDownloading -> {
+                println("- 状态: 正在下载")
+                DownloadStatus.Downloading
+            }
+            // 已下载到外部存储且已缓存
+            downloadedFile.exists() && isCached -> {
+                println("- 状态: 已下载且已缓存")
+                DownloadStatus.Success(downloadedFile.absolutePath, true)
+            }
+            // 仅下载到外部存储
+            downloadedFile.exists() -> {
+                println("- 状态: 仅下载")
+                DownloadStatus.Success(downloadedFile.absolutePath, false)
+            }
+            // 仅缓存在应用内
+            isCached -> {
+                println("- 状态: 仅缓存")
+                DownloadStatus.Success(musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC), true)
+            }
+            // 未下载也未缓存
+            else -> {
+                println("- 状态: 未开始")
+                DownloadStatus.NotStarted
+            }
+        }
     }
 }

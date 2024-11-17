@@ -176,8 +176,7 @@ fun MusicPlayerApp(
                                                 },
                                                 onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                 onDownloadClick = { viewModel.downloadSong(song.song) },
-                                                downloadStatus = viewModel.downloadStatus.collectAsState().value[song.song.url]
-                                                    ?: DownloadStatus.NotStarted
+                                                downloadStatus = viewModel.checkSongStatus(song.song)
                                             )
                                         }
                                     }
@@ -220,8 +219,8 @@ fun MusicPlayerApp(
                                                     },
                                                     onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                     onDownloadClick = { viewModel.downloadSong(song.song) },
-                                                    downloadStatus = viewModel.downloadStatus.collectAsState().value[song.song.url]
-                                                        ?: DownloadStatus.NotStarted
+                                                    downloadStatus = viewModel.checkSongStatus(song.song),
+                                                    modifier = Modifier.padding(vertical = 4.dp)
                                                 )
                                             }
                                         }

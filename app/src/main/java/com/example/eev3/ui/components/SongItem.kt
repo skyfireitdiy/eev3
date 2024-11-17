@@ -46,12 +46,51 @@ fun SongItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 歌曲标题
-            Text(
-                text = song.song.title,
-                style = MaterialTheme.typography.bodyLarge,
+            // 歌曲标题和状态标签
+            Column(
                 modifier = Modifier.weight(1f)
-            )
+            ) {
+                Text(
+                    text = song.song.title,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                
+                // 修改状态显示逻辑
+                when (downloadStatus) {
+                    is DownloadStatus.Success -> {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            // 只在已缓存时显示"已缓存"
+                            if (downloadStatus.isCached) {
+                                Text(
+                                    text = "已缓存",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                )
+                            }
+                            // 只在路径是外部存储时显示"已下载"
+                            if (downloadStatus.path.startsWith("/storage/")) {
+                                Text(
+                                    text = "已下载",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+                    is DownloadStatus.Downloading -> {
+                        Text(
+                            text = "下载中...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    else -> {} // NotStarted 和 Error 状态不显示标签
+                }
+            }
             
             // 收藏按钮
             IconButton(onClick = onFavoriteClick) {
@@ -82,7 +121,18 @@ fun SongItem(
                             when (downloadStatus) {
                                 is DownloadStatus.NotStarted -> "下载"
                                 is DownloadStatus.Downloading -> "下载中..."
-                                is DownloadStatus.Success -> "已下载"
+                                is DownloadStatus.Success -> {
+                                    when {
+                                        downloadStatus.path.startsWith("/storage/") && downloadStatus.isCached -> 
+                                            "已下载和缓存"
+                                        downloadStatus.path.startsWith("/storage/") -> 
+                                            "已下载"
+                                        downloadStatus.isCached -> 
+                                            "已缓存"
+                                        else -> 
+                                            "下载"
+                                    }
+                                }
                                 is DownloadStatus.Error -> "下载失败"
                             }
                         )
