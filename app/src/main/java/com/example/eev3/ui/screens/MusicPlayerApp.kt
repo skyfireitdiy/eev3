@@ -223,6 +223,41 @@ fun MusicPlayerApp(
                                                     modifier = Modifier.padding(vertical = 4.dp)
                                                 )
                                             }
+                                            
+                                            // 添加加载更多项
+                                            item {
+                                                val loadingMore by viewModel.loadingMore.collectAsStateWithLifecycle()
+                                                val reachedEnd by viewModel.reachedEnd.collectAsStateWithLifecycle()
+                                                
+                                                if (searchResults.isNotEmpty()) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(16.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (loadingMore) {
+                                                            CircularProgressIndicator(
+                                                                modifier = Modifier.size(24.dp),
+                                                                color = ChineseRed
+                                                            )
+                                                        } else if (reachedEnd) {
+                                                            Text(
+                                                                text = "已经到底了",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                                            )
+                                                        } else {
+                                                            // 如果不是在加载中且没有到底，显示加载更多按钮
+                                                            TextButton(
+                                                                onClick = { viewModel.loadMore() }
+                                                            ) {
+                                                                Text("加载更多")
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }

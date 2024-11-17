@@ -136,6 +136,21 @@ class MusicViewModel(
     private val _downloadTip = MutableStateFlow<DownloadTip?>(null)
     val downloadTip: StateFlow<DownloadTip?> = _downloadTip.asStateFlow()
 
+    // 添加分页相关状态
+    private var currentPage = 1
+    private var totalPages = 1
+    private var isLastPage = false
+    private var isLoading = false
+    private var currentKeyword = ""
+
+    // 添加加载状态
+    private val _loadingMore = MutableStateFlow(false)
+    val loadingMore: StateFlow<Boolean> = _loadingMore
+
+    // 添加到底提示状态
+    private val _reachedEnd = MutableStateFlow(false)
+    val reachedEnd: StateFlow<Boolean> = _reachedEnd
+
     init {
         // 加载保存的收藏
         viewModelScope.launch {
@@ -183,16 +198,40 @@ class MusicViewModel(
         )
     }
 
-    fun searchSongs(query: String) {
+    fun searchSongs(query: String, page: Int = 1) {
+        if (isLoading) return
+        isLoading = true
+        
+        // 如果是新搜索，重置状态
+        if (page == 1) {
+            currentKeyword = query
+            _searchResults.value = emptyList()
+            _reachedEnd.value = false
+        }
+        
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     val encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.toString())
-                    val url = "$BASE_URL/so/$encodedQuery.html"
+                    val url = if (page == 1) {
+                        "$BASE_URL/so/$encodedQuery.html"
+                    } else {
+                        "$BASE_URL/so/$encodedQuery/$page.html"
+                    }
+                    
+                    println("MusicViewModel: 搜索URL=$url")
                     
                     val document = Jsoup.connect(url)
                         .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
                         .get()
+                    
+                    // 解析总数和总页数
+                    val pageDataText = document.selectFirst(".pagedata")?.text() ?: ""
+                    val totalCountMatch = "共有(\\d+)首搜索结果".toRegex().find(pageDataText)
+                    val totalCount = totalCountMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    totalPages = (totalCount + 59) / 60 // 每页60首歌曲
+                    
+                    println("MusicViewModel: 总数=$totalCount, 总页数=$totalPages, 当前页=$page")
                     
                     val songElements = document.select(".play_list ul li")
                     val songs = songElements.mapNotNull { element ->
@@ -212,21 +251,45 @@ class MusicViewModel(
                         } else null
                     }
                     
-                    _searchResults.value = songs
+                    // 更新搜索结果
+                    if (page == 1) {
+                        _searchResults.value = songs
+                    } else {
+                        _searchResults.value = _searchResults.value + songs
+                    }
+                    
+                    currentPage = page
+                    isLastPage = page >= totalPages
                     
                     if (songs.isEmpty()) {
                         _searchError.value = "未找到相关歌曲"
+                    }
+                    
+                    // 如果到达最后一页，显示提示
+                    if (isLastPage) {
+                        _reachedEnd.value = true
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _searchError.value = when {
-                    e.message?.contains("Unable to resolve host") == true -> "网络连接失败，请检查网络置"
+                    e.message?.contains("Unable to resolve host") == true -> "网络连接失败，请检查网络设置"
                     e.message?.contains("timeout") == true -> "网络连接超时，请稍后重试"
                     e.message != null -> "搜索出错: ${e.message}"
                     else -> "网络连接失败，请检查网络设置"
                 }
+            } finally {
+                isLoading = false
+                _loadingMore.value = false
             }
+        }
+    }
+
+    // 加载更多
+    fun loadMore() {
+        if (!isLoading && !isLastPage) {
+            _loadingMore.value = true
+            searchSongs(currentKeyword, currentPage + 1)
         }
     }
 
@@ -385,7 +448,7 @@ class MusicViewModel(
                                     
                                     // 初始化播放器
                                     withContext(Dispatchers.Main) {
-                                        println("MusicViewModel: 使用新下���的音乐初始化播放器")
+                                        println("MusicViewModel: 使用新下的音乐初始化播放器")
                                         initializePlayer(context, finalUrl)
                                     }
                                 }
@@ -560,7 +623,7 @@ class MusicViewModel(
         exoPlayer?.repeatMode = when (_playMode.value) {
             PlayMode.SEQUENCE -> Player.REPEAT_MODE_ALL
             PlayMode.SINGLE_LOOP -> Player.REPEAT_MODE_ONE
-            PlayMode.RANDOM -> Player.REPEAT_MODE_ALL  // 随机模式下也设置��循环全部
+            PlayMode.RANDOM -> Player.REPEAT_MODE_ALL  // 随机模式下也设置循环全部
             PlayMode.ONCE -> Player.REPEAT_MODE_OFF
         }
         
@@ -683,7 +746,7 @@ class MusicViewModel(
                 val currentSongUrl = currentPlayingSong?.url
                 
                 if (currentSongUrl != null) {
-                    println("MusicViewModel: 清除缓存时保护当前播���歌曲: ${currentPlayingSong?.title}")
+                    println("MusicViewModel: 清除缓存时保护当前播放歌曲: ${currentPlayingSong?.title}")
                 }
                 
                 // 清除缓存时跳过当前播放的音乐
@@ -849,7 +912,7 @@ class MusicViewModel(
         println("- 正在下载中: $isDownloading")
         
         return when {
-            // 正在下载中
+            // 正在下��中
             isDownloading -> {
                 println("- 状态: 正在下载")
                 DownloadStatus.Downloading
