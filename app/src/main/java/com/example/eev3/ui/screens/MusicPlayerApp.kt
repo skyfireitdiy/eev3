@@ -28,6 +28,7 @@ import com.example.eev3.viewmodel.MusicViewModel
 import com.example.eev3.viewmodel.MusicViewModelFactory
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement.spacedBy
+import com.example.eev3.data.DownloadStatus
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -57,6 +58,11 @@ fun MusicPlayerApp(
     
     val showClearCacheDialog by viewModel.showClearCacheDialog.collectAsStateWithLifecycle()
     val cacheSize by viewModel.cacheSize.collectAsStateWithLifecycle()
+    
+    // 收集下载提示状态
+    val downloadTip by viewModel.downloadTip.collectAsState()
+    
+    val snackbarHostState = remember { SnackbarHostState() }
     
     // 处理返回键
     BackHandler(enabled = showPlayer) {
@@ -136,12 +142,13 @@ fun MusicPlayerApp(
                             }
                         }
                     }
-                }
-            ) { padding ->
+                },
+                snackbarHost = { SnackbarHost(snackbarHostState) }
+            ) { paddingValues ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
+                        .padding(paddingValues)
                 ) {
                     HorizontalPager(
                         state = pagerState,
@@ -159,15 +166,18 @@ fun MusicPlayerApp(
                                         verticalArrangement = Arrangement.Top,
                                         userScrollEnabled = true
                                     ) {
-                                        items(favorites) { observableSong ->
+                                        items(favorites) { song ->
                                             SongItem(
-                                                observableSong = observableSong,
-                                                onClick = {
-                                                    currentSong = observableSong.song
-                                                    viewModel.loadPlayerData(observableSong.song)
+                                                song = song,
+                                                onSongClick = {
+                                                    currentSong = song.song
+                                                    viewModel.loadPlayerData(song.song)
                                                     showPlayer = true
                                                 },
-                                                onFavoriteClick = { viewModel.toggleFavorite(observableSong) }
+                                                onFavoriteClick = { viewModel.toggleFavorite(song) },
+                                                onDownloadClick = { viewModel.downloadSong(song.song) },
+                                                downloadStatus = viewModel.downloadStatus.collectAsState().value[song.song.url]
+                                                    ?: DownloadStatus.NotStarted
                                             )
                                         }
                                     }
@@ -200,15 +210,18 @@ fun MusicPlayerApp(
                                             verticalArrangement = Arrangement.Top,
                                             userScrollEnabled = true
                                         ) {
-                                            items(searchResults) { observableSong ->
+                                            items(searchResults) { song ->
                                                 SongItem(
-                                                    observableSong = observableSong,
-                                                    onClick = {
-                                                        currentSong = observableSong.song
-                                                        viewModel.loadPlayerData(observableSong.song)
+                                                    song = song,
+                                                    onSongClick = {
+                                                        currentSong = song.song
+                                                        viewModel.loadPlayerData(song.song)
                                                         showPlayer = true
                                                     },
-                                                    onFavoriteClick = { viewModel.toggleFavorite(observableSong) }
+                                                    onFavoriteClick = { viewModel.toggleFavorite(song) },
+                                                    onDownloadClick = { viewModel.downloadSong(song.song) },
+                                                    downloadStatus = viewModel.downloadStatus.collectAsState().value[song.song.url]
+                                                        ?: DownloadStatus.NotStarted
                                                 )
                                             }
                                         }
@@ -316,6 +329,24 @@ fun MusicPlayerApp(
                 }
             }
         )
+    }
+
+    // 显示下载提示
+    LaunchedEffect(downloadTip) {
+        downloadTip?.let { tip ->
+            snackbarHostState.showSnackbar(
+                message = buildString {
+                    append(tip.message)
+                    tip.path?.let { path ->
+                        append("\n保存位置: $path")
+                    }
+                },
+                actionLabel = if (tip.path != null) "查看" else null,
+                duration = SnackbarDuration.Long
+            )
+            // 显示后清除提示
+            viewModel.clearDownloadTip()
+        }
     }
 }
 
