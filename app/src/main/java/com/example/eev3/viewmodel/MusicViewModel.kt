@@ -1303,6 +1303,12 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
+                // 如���有音乐在播放，先暂停
+                if (exoPlayer?.isPlaying == true) {
+                    println("MusicViewModel: 暂停音乐播放")
+                    exoPlayer?.pause()
+                }
+                
                 _mvCaching.value = true
                 val songId = song.url.substringAfterLast("/").substringBefore(".html")
                 val sanitizedTitle = sanitizeFileName(song.title)
