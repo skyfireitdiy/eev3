@@ -350,7 +350,7 @@ class MusicViewModel(
                         _searchError.value = "未找到相关歌曲"
                     }
                     
-                    // 如果到达最后一页，显示提示
+                    // 到达最后一页，示提示
                     if (isLastPage) {
                         _reachedEnd.value = true
                     }
@@ -410,13 +410,13 @@ class MusicViewModel(
     )
 
     fun loadPlayerData(song: Song, source: PlaylistSource) {
-        println("MusicViewModel: 开始加载歌曲 title=${song.title}, source=$source")
+        println("MusicViewModel: 开始播放 ${song.title}")
         
         // 更新播放列表来源和索引
         currentPlaylistSource = source
         val playlist = currentPlaylist
         currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
-        println("MusicViewModel: 当前播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
         
         _currentPlayingSongState.value = song
         
@@ -535,9 +535,9 @@ class MusicViewModel(
                                         audioUrl = finalUrl
                                     )
                                     
-                                    // 初始化播放器
+                                    // 立即启动服务
                                     withContext(Dispatchers.Main) {
-                                        println("MusicViewModel: 使用新下的音乐初始化播放器")
+                                        println("MusicViewModel: 更新播放数据后启动服务")
                                         initializePlayer(context, finalUrl)
                                     }
                                 }
@@ -635,12 +635,35 @@ class MusicViewModel(
             }
         }
         
+        // 启动前台服务前先检查 PlayerData
+        val playerData = _currentPlayerData.value
+        if (playerData == null) {
+            println("MusicViewModel: 当前没有播放数据，不启动服务")
+            return
+        }
+        
         // 启动前台服务
-        val serviceIntent = Intent(context, MusicService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        val serviceIntent = Intent(context, MusicService::class.java).apply {
+            println("MusicViewModel: 准备启动服务，当前播放数据:")
+            println("- 标题: ${playerData.title}")
+            println("- 音频URL: ${playerData.audioUrl}")
+            println("- 封面: ${playerData.coverImage}")
+            putExtra(MusicService.EXTRA_PLAYER_DATA, playerData)
+        }
+        
+        println("MusicViewModel: 开始启动服务")
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                println("MusicViewModel: 使用 startForegroundService")
+                context.startForegroundService(serviceIntent)
+            } else {
+                println("MusicViewModel: 使用 startService")
+                context.startService(serviceIntent)
+            }
+            println("MusicViewModel: 服务启动成功")
+        } catch (e: Exception) {
+            println("MusicViewModel: 启动服务失败: ${e.message}")
+            e.printStackTrace()
         }
     }
     
@@ -854,7 +877,7 @@ class MusicViewModel(
         }
     }
 
-    // 清理文件名中的非法字符
+    // 清���文件名中的非法字符
     private fun sanitizeFileName(fileName: String): String {
         return fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
             .replace(Regex("\\s+"), "_")
@@ -1205,7 +1228,7 @@ class MusicViewModel(
             return
         }
         
-        println("MusicViewModel: 当前播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
         
         when (_playMode.value) {
             PlayMode.SEQUENCE -> {
@@ -1220,8 +1243,7 @@ class MusicViewModel(
                 }
             }
             PlayMode.SINGLE_LOOP -> {
-                // 单曲循环，重新播放当前歌曲
-                println("MusicViewModel: 单曲循环，重新播放")
+                println("MusicViewModel: 单曲循环，重新��放")
                 exoPlayer?.seekTo(0)
                 exoPlayer?.play()
             }
@@ -1232,7 +1254,6 @@ class MusicViewModel(
                 loadPlayerData(playlist[nextIndex], currentPlaylistSource)
             }
             PlayMode.ONCE -> {
-                // 单次播放，不做任何操作
                 println("MusicViewModel: 单次播放模式，播放结束")
             }
         }
