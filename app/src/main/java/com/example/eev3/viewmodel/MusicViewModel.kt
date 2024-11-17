@@ -140,7 +140,6 @@ class MusicViewModel(
     private var currentPage = 1
     private var totalPages = 1
     private var isLastPage = false
-    private var isLoading = false
     private var currentKeyword = ""
 
     // 添加加载状态
@@ -150,6 +149,34 @@ class MusicViewModel(
     // 添加到底提示状态
     private val _reachedEnd = MutableStateFlow(false)
     val reachedEnd: StateFlow<Boolean> = _reachedEnd
+
+    // 添加榜单类型枚举
+    enum class RankType {
+        NEW,        // 新歌榜
+        TOP,        // TOP榜单
+        DJ_DANCE    // DJ舞曲
+    }
+
+    // 添加榜单相关状态
+    private val _rankSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
+    val rankSongs: StateFlow<List<ObservableSong>> = _rankSongs
+
+    private var rankCurrentPage = 1
+    private var rankTotalPages = 1
+    private var isRankLastPage = false
+    private var isRankLoading = false
+    private var currentRankType: RankType? = null
+
+    // 添加榜单加载状态
+    private val _rankLoadingMore = MutableStateFlow(false)
+    val rankLoadingMore: StateFlow<Boolean> = _rankLoadingMore
+
+    // 添加榜单到底提示状态
+    private val _rankReachedEnd = MutableStateFlow(false)
+    val rankReachedEnd: StateFlow<Boolean> = _rankReachedEnd
+
+    // 添加 isLoading 变量
+    private var isLoading = false
 
     init {
         // 加载保存的收藏
@@ -410,7 +437,7 @@ class MusicViewModel(
                                     val finalUrl = musicCache.cacheMusic(song.url, audioUrl)
                                     println("MusicViewModel: 音乐缓存完成 finalUrl=$finalUrl")
                                     
-                                    println("MusicViewModel: 开始缓存封面")
+                                    println("MusicViewModel: 开始缓存封���")
                                     // 缓存封面
                                     val coverUrl = playResponse.pic
                                     val finalCoverUrl = musicCache.cacheCover(song.url, coverUrl)
@@ -912,7 +939,7 @@ class MusicViewModel(
         println("- 正在下载中: $isDownloading")
         
         return when {
-            // 正在下��中
+            // 正在下载中
             isDownloading -> {
                 println("- 状态: 正在下载")
                 DownloadStatus.Downloading
@@ -936,6 +963,109 @@ class MusicViewModel(
             else -> {
                 println("- 状态: 未开始")
                 DownloadStatus.NotStarted
+            }
+        }
+    }
+
+    // 加载榜单数据
+    fun loadRankSongs(type: RankType, page: Int = 1) {
+        if (isRankLoading) return
+        isRankLoading = true
+        
+        // 如果是新的榜单类型或重新加载第一页，重置状态
+        if (type != currentRankType || page == 1) {
+            currentRankType = type
+            _rankSongs.value = emptyList()
+            _rankReachedEnd.value = false
+            rankCurrentPage = 1
+        }
+        
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val url = when (type) {
+                        RankType.NEW -> {
+                            if (page == 1) "$BASE_URL/list/new.html"
+                            else "$BASE_URL/list/new/$page.html"
+                        }
+                        RankType.TOP -> {
+                            if (page == 1) "$BASE_URL/list/top.html"
+                            else "$BASE_URL/list/top/$page.html"
+                        }
+                        RankType.DJ_DANCE -> {
+                            if (page == 1) "$BASE_URL/list/djwuqu.html"
+                            else "$BASE_URL/list/djwuqu/$page.html"
+                        }
+                    }
+                    
+                    println("MusicViewModel: 加载榜单 type=$type, page=$page, url=$url")
+                    
+                    val document = Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                        .get()
+                    
+                    // 解析总数和总页数
+                    val pageDataText = document.selectFirst(".pagedata")?.text() ?: ""
+                    val totalCountMatch = "共有(\\d+)首搜索结果".toRegex().find(pageDataText)
+                    val totalCount = totalCountMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    rankTotalPages = (totalCount + 59) / 60 // 每页60首歌曲
+                    
+                    println("MusicViewModel: 榜单总数=$totalCount, 总页数=$rankTotalPages, 当前页=$page")
+                    
+                    val songElements = document.select(".play_list ul li")
+                    val songs = songElements.mapNotNull { element ->
+                        val nameElement = element.selectFirst(".name a") ?: return@mapNotNull null
+                        val title = nameElement.text()
+                            .replace("&nbsp;", " ")
+                            .replace("[MP3_LRC]", "")
+                            .trim()
+                        val songPath = nameElement.attr("href")
+                        val songUrl = when {
+                            songPath.startsWith("http") -> songPath
+                            songPath.startsWith("/") -> "$BASE_URL$songPath"
+                            else -> "$BASE_URL/$songPath"
+                        }
+                        if (title.isNotEmpty() && songUrl.isNotEmpty()) {
+                            ObservableSong(Song(title, songUrl))
+                        } else null
+                    }
+                    
+                    // 更新榜单数据
+                    if (page == 1) {
+                        _rankSongs.value = songs
+                    } else {
+                        _rankSongs.value = _rankSongs.value + songs
+                    }
+                    
+                    rankCurrentPage = page
+                    isRankLastPage = page >= rankTotalPages
+                    
+                    // 如果到达最后一页，显示提示
+                    if (isRankLastPage) {
+                        _rankReachedEnd.value = true
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _searchError.value = when {
+                    e.message?.contains("Unable to resolve host") == true -> "网络连接失败，请检查网络设置"
+                    e.message?.contains("timeout") == true -> "网络连接超时，请稍后重试"
+                    e.message != null -> "加载失败: ${e.message}"
+                    else -> "网络连接失败，请检查网络设置"
+                }
+            } finally {
+                isRankLoading = false
+                _rankLoadingMore.value = false
+            }
+        }
+    }
+
+    // 加载更多榜单数据
+    fun loadMoreRank() {
+        currentRankType?.let { type ->
+            if (!isRankLoading && !isRankLastPage) {
+                _rankLoadingMore.value = true
+                loadRankSongs(type, rankCurrentPage + 1)
             }
         }
     }
