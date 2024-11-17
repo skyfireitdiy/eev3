@@ -197,7 +197,8 @@ fun MusicPlayerApp(
                                                 },
                                                 onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                 onDownloadClick = { viewModel.downloadSong(song.song) },
-                                                downloadStatus = viewModel.checkSongStatus(song.song)
+                                                downloadStatus = viewModel.checkSongStatus(song.song),
+                                                onPlayMVClick = { viewModel.playMV(song.song) }
                                             )
                                         }
                                     }
@@ -242,7 +243,8 @@ fun MusicPlayerApp(
                                                     onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                     onDownloadClick = { viewModel.downloadSong(song.song) },
                                                     downloadStatus = viewModel.checkSongStatus(song.song),
-                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                    modifier = Modifier.padding(vertical = 4.dp),
+                                                    onPlayMVClick = { viewModel.playMV(song.song) }
                                                 )
                                             }
                                             

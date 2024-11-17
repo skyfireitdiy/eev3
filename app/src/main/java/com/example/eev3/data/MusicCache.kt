@@ -12,12 +12,16 @@ class MusicCache(context: Context) {
     private val cacheDir = File(context.cacheDir, "music")
     private val lyricsDir = File(context.cacheDir, "lyrics")
     private val coverDir = File(context.cacheDir, "covers")
-    private val client = OkHttpClient()
+    private val mvDir = File(context.cacheDir, "mv")
+    private val client = OkHttpClient.Builder()
+        .followRedirects(false)
+        .build()
 
     init {
         cacheDir.mkdirs()
         lyricsDir.mkdirs()
         coverDir.mkdirs()
+        mvDir.mkdirs()
     }
 
     // 从URL中提取歌曲ID
@@ -34,11 +38,13 @@ class MusicCache(context: Context) {
             CacheType.MUSIC -> "$songId.mp3"
             CacheType.LYRICS -> "$songId.lrc"
             CacheType.COVER -> "$songId.jpg"
+            CacheType.MV -> "$songId.mp4"
         }
         val directory = when (type) {
             CacheType.MUSIC -> cacheDir
             CacheType.LYRICS -> lyricsDir
             CacheType.COVER -> coverDir
+            CacheType.MV -> mvDir
         }
         return File(directory, fileName)
     }
@@ -132,6 +138,7 @@ class MusicCache(context: Context) {
             CacheType.MUSIC -> "$songId.mp3"
             CacheType.LYRICS -> "$songId.lrc"
             CacheType.COVER -> "$songId.jpg"
+            CacheType.MV -> "$songId.mp4"
         }
     }
     
@@ -192,7 +199,8 @@ class MusicCache(context: Context) {
     enum class CacheType {
         MUSIC,
         LYRICS,
-        COVER
+        COVER,
+        MV
     }
     
     // 计算URL的MD5值作为文件名
@@ -200,5 +208,103 @@ class MusicCache(context: Context) {
         val md = MessageDigest.getInstance("MD5")
         val digest = md.digest(toByteArray())
         return digest.joinToString("") { "%02x".format(it) }
+    }
+    
+    // 获取 MV 真实地址
+    suspend fun getMVUrl(songId: String): String = withContext(Dispatchers.IO) {
+        val url = "http://www.eev3.com/plug/down.php?ac=vplay&id=$songId&q=1080"
+        println("MusicCache: 获取 MV 地址: $url")
+        
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Accept", "*/*")
+            .addHeader("Accept-Encoding", "identity;q=1, *;q=0")
+            .addHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6")
+            .addHeader("DNT", "1")
+            .addHeader("Host", "www.eev3.com")
+            .addHeader("Proxy-Connection", "keep-alive")
+            .addHeader("Range", "bytes=0-")
+            .addHeader("Referer", "http://www.eev3.com/video/$songId.html")
+            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            println("MusicCache: MV 地址请求响应码: ${response.code}")
+            println("MusicCache: MV 地址响应头: ${response.headers}")
+            
+            val location = response.header("location")
+            if (location == null) {
+                println("MusicCache: 未找到 location 头")
+                throw Exception("无法获取 MV 地址")
+            }
+            
+            println("MusicCache: 获取到 MV 真实地址: $location")
+            location
+        }
+    }
+    
+    // 缓存 MV
+    suspend fun cacheMV(songId: String, mvUrl: String): String = withContext(Dispatchers.IO) {
+        println("MusicCache: 准备缓存 MV")
+        println("MusicCache: songId = $songId")
+        println("MusicCache: mvUrl = $mvUrl")
+        
+        val cacheFile = File(mvDir, "$songId.mp4")
+        println("MusicCache: 缓存文件路径: ${cacheFile.absolutePath}")
+        
+        if (cacheFile.exists()) {
+            println("MusicCache: MV 已缓存，直接返回")
+            return@withContext cacheFile.toURI().toString()
+        }
+
+        println("MusicCache: 开始下载 MV")
+        
+        try {
+            val request = Request.Builder()
+                .url(mvUrl)
+                .build()
+            
+            val client = OkHttpClient.Builder()
+                .followRedirects(true)
+                .build()
+            
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    println("MusicCache: MV 下载请求失败: ${response.code}")
+                    throw Exception("下载请求失败: ${response.code}")
+                }
+                
+                response.body?.let { body ->
+                    val contentLength = body.contentLength()
+                    println("MusicCache: MV 文件大小: $contentLength bytes")
+                    
+                    cacheFile.outputStream().use { output ->
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Int
+                            var totalBytesRead = 0L
+                            
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                totalBytesRead += bytesRead
+                                if (totalBytesRead % (1024 * 1024) == 0L) {
+                                    println("MusicCache: 已下载: ${totalBytesRead / (1024 * 1024)}MB")
+                                }
+                            }
+                            println("MusicCache: MV 下载完成，总大小: ${totalBytesRead / (1024 * 1024)}MB")
+                        }
+                    }
+                } ?: throw Exception("响应体为空")
+            }
+            
+            println("MusicCache: MV 缓存成功: ${cacheFile.absolutePath}")
+            cacheFile.toURI().toString()
+        } catch (e: Exception) {
+            println("MusicCache: MV 缓存失败: ${e.message}")
+            println("MusicCache: 错误堆栈:")
+            e.printStackTrace()
+            cacheFile.delete()
+            throw e
+        }
     }
 } 

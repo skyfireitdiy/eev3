@@ -38,6 +38,8 @@ import java.net.URI
 import android.media.MediaScannerConnection
 import android.os.Environment
 import com.example.eev3.data.DownloadStatus
+import android.net.Uri
+import androidx.core.content.FileProvider
 
 class MusicViewModel(
     private val favoritesDataStore: FavoritesDataStore,
@@ -236,6 +238,10 @@ class MusicViewModel(
     private var isTopRankLoading = false
     private var isDjDanceLoading = false
 
+    // 添加 MV 相关状态
+    private val _mvCaching = MutableStateFlow(false)
+    val mvCaching: StateFlow<Boolean> = _mvCaching
+
     init {
         // 加载保存的收藏
         viewModelScope.launch {
@@ -404,7 +410,7 @@ class MusicViewModel(
         }
         _favorites.value = currentFavorites
         
-        // 保存更新后的收藏列表
+        // 保存更新后的藏列表
         viewModelScope.launch {
             favoritesDataStore.saveFavorites(currentFavorites.map { it.song })
         }
@@ -529,7 +535,7 @@ class MusicViewModel(
                                     client.newCall(lrcRequest).execute().use { lrcResponse ->
                                         val lrcContent = lrcResponse.body?.string() ?: ""
                                         println("MusicViewModel: 开始缓存歌词")
-                                        // 缓存歌词
+                                        // 缓存词
                                         lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
                                         println("MusicViewModel: 歌词缓存完成 lyricsUri=$lyricsUri")
                                         _lyrics.value = parseLyrics(lrcContent)
@@ -548,7 +554,7 @@ class MusicViewModel(
                                         audioUrl = finalUrl
                                     )
                                     
-                                    // 立即启动服务
+                                    // 立即启动服
                                     withContext(Dispatchers.Main) {
                                         println("MusicViewModel: 更新播放数据后启动服务")
                                         initializePlayer(context, finalUrl)
@@ -648,7 +654,7 @@ class MusicViewModel(
             }
         }
         
-        // 启动前台服务前先检查 PlayerData
+        // 启动前台服���前先检查 PlayerData
         val playerData = _currentPlayerData.value
         if (playerData == null) {
             println("MusicViewModel: 当前没有播放数据，不启动服务")
@@ -913,7 +919,7 @@ class MusicViewModel(
                     val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
                     downloadDir.mkdirs()
                     
-                    // 准备目标文件名（使用歌曲标题）
+                    // 准备目文件名（使用歌曲标题）
                     val sanitizedTitle = sanitizeFileName(song.title)
                     val targetFile = File(downloadDir, "$sanitizedTitle.mp3")
                     
@@ -1245,7 +1251,7 @@ class MusicViewModel(
         }
     }
 
-    // 修改播放结束时的处理
+    // 修改播放束时的处理
     private fun handlePlaybackEnd() {
         println("MusicViewModel: 播放结束，切换到下一首")
         val playlist = currentPlaylist
@@ -1281,6 +1287,61 @@ class MusicViewModel(
             }
             PlayMode.ONCE -> {
                 println("MusicViewModel: 单次播放模式，播放结束")
+            }
+        }
+    }
+
+    // 播放 MV
+    fun playMV(song: Song) {
+        if (!song.hasMV) return
+        
+        viewModelScope.launch {
+            try {
+                _mvCaching.value = true
+                val songId = song.url.substringAfterLast("/").substringBefore(".html")
+                
+                // 检查是否已缓存
+                val cacheFile = File(context.cacheDir, "mv/$songId.mp4")
+                val mvUri = if (cacheFile.exists()) {
+                    println("MusicViewModel: 使用缓存的 MV")
+                    FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        cacheFile
+                    )
+                } else {
+                    println("MusicViewModel: 获取 MV 地址")
+                    val mvUrl = musicCache.getMVUrl(songId)
+                    println("MusicViewModel: 开始缓存 MV")
+                    val cacheUri = musicCache.cacheMV(songId, mvUrl)
+                    FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        File(URI(cacheUri))
+                    )
+                }
+                
+                // 使用系统播放器播放
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(mvUri, "video/mp4")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                
+                // 显示缓存完成提示
+                _downloadTip.value = DownloadTip(
+                    message = "MV 已准备就绪"
+                )
+                
+                // 启动播放器
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                println("MusicViewModel: MV 播放失败: ${e.message}")
+                e.printStackTrace()
+                _downloadTip.value = DownloadTip(
+                    message = "MV 播放失败: ${e.message}"
+                )
+            } finally {
+                _mvCaching.value = false
             }
         }
     }
