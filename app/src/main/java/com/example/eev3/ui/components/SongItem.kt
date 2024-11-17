@@ -27,6 +27,7 @@ fun SongItem(
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showConfirmDialog by remember { mutableStateOf(false) }
     
     Surface(
         modifier = modifier
@@ -112,28 +113,17 @@ fun SongItem(
             onDismissRequest = { showMenu = false }
         ) {
             DropdownMenuItem(
+                enabled = downloadStatus !is DownloadStatus.Downloading,
                 text = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 统一显示"下载"
                         Text(
                             when (downloadStatus) {
-                                is DownloadStatus.NotStarted -> "下载"
                                 is DownloadStatus.Downloading -> "下载中..."
-                                is DownloadStatus.Success -> {
-                                    when {
-                                        downloadStatus.path.startsWith("/storage/") && downloadStatus.isCached -> 
-                                            "已下载和缓存"
-                                        downloadStatus.path.startsWith("/storage/") -> 
-                                            "已下载"
-                                        downloadStatus.isCached -> 
-                                            "已缓存"
-                                        else -> 
-                                            "下载"
-                                    }
-                                }
-                                is DownloadStatus.Error -> "下载失败"
+                                else -> "下载"
                             }
                         )
                         if (downloadStatus is DownloadStatus.Downloading) {
@@ -146,8 +136,43 @@ fun SongItem(
                 },
                 onClick = {
                     showMenu = false
-                    if (downloadStatus !is DownloadStatus.Downloading) {
-                        onDownloadClick()
+                    when (downloadStatus) {
+                        is DownloadStatus.Success -> {
+                            if (downloadStatus.path.startsWith("/storage/")) {
+                                // 如果已经下载过，显示确认对话框
+                                showConfirmDialog = true
+                            } else {
+                                // 如果只是缓存，直接下载
+                                onDownloadClick()
+                            }
+                        }
+                        else -> onDownloadClick()
+                    }
+                }
+            )
+        }
+
+        // 重复下载确认对话框
+        if (showConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showConfirmDialog = false },
+                title = { Text("确认重新下载") },
+                text = { Text("该歌曲已经下载过了，是否要重新下载？") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showConfirmDialog = false
+                            onDownloadClick()
+                        }
+                    ) {
+                        Text("确定")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showConfirmDialog = false }
+                    ) {
+                        Text("取消")
                     }
                 }
             )
