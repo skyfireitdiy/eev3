@@ -25,6 +25,7 @@ fun SongItem(
     onFavoriteClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onPlayMVClick: () -> Unit = {},
+    onDownloadMVClick: () -> Unit = {},
     downloadStatus: DownloadStatus = DownloadStatus.NotStarted,
     modifier: Modifier = Modifier
 ) {
@@ -84,7 +85,7 @@ fun SongItem(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 4.dp)
                         ) {
-                            // 只在已缓存时显示"已缓存"
+                            // 音乐缓存和下载状态
                             if (downloadStatus.isCached) {
                                 Text(
                                     text = "已缓存",
@@ -92,13 +93,29 @@ fun SongItem(
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
                                 )
                             }
-                            // 只在路径是外部存储时显示"已下载"
                             if (downloadStatus.path.startsWith("/storage/")) {
                                 Text(
                                     text = "已下载",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.8f)
                                 )
+                            }
+                            // MV 缓存和下载状态
+                            if (song.song.hasMV) {
+                                if (downloadStatus.hasMVCached) {
+                                    Text(
+                                        text = "MV已缓存",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f)
+                                    )
+                                }
+                                if (downloadStatus.hasMVDownloaded) {
+                                    Text(
+                                        text = "MV已下载",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -133,6 +150,7 @@ fun SongItem(
             expanded = showMenu,
             onDismissRequest = { showMenu = false }
         ) {
+            // 下载音乐菜单项
             DropdownMenuItem(
                 enabled = downloadStatus !is DownloadStatus.Downloading,
                 text = {
@@ -140,11 +158,10 @@ fun SongItem(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 统一显示"下载"
                         Text(
                             when (downloadStatus) {
                                 is DownloadStatus.Downloading -> "下载中..."
-                                else -> "下载"
+                                else -> "下载音乐"
                             }
                         )
                         if (downloadStatus is DownloadStatus.Downloading) {
@@ -160,10 +177,8 @@ fun SongItem(
                     when (downloadStatus) {
                         is DownloadStatus.Success -> {
                             if (downloadStatus.path.startsWith("/storage/")) {
-                                // 如果已经下载过，显示确认对话框
                                 showConfirmDialog = true
                             } else {
-                                // 如果只是缓存，直接下载
                                 onDownloadClick()
                             }
                         }
@@ -171,13 +186,39 @@ fun SongItem(
                     }
                 }
             )
-            // 如果有 MV，添加播放 MV 菜单项
+            
+            // 如果有 MV，添加 MV 相关菜单项
             if (song.song.hasMV) {
+                // 播放 MV 菜单项
                 DropdownMenuItem(
                     text = { Text("播放 MV") },
                     onClick = {
                         showMenu = false
                         onPlayMVClick()
+                    }
+                )
+                
+                // 下载 MV 菜单项
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                when (downloadStatus) {
+                                    is DownloadStatus.Success -> {
+                                        if (downloadStatus.hasMVDownloaded) "重新下载 MV"
+                                        else "下载 MV"
+                                    }
+                                    else -> "下载 MV"
+                                }
+                            )
+                        }
+                    },
+                    onClick = {
+                        showMenu = false
+                        onDownloadMVClick()
                     }
                 )
             }

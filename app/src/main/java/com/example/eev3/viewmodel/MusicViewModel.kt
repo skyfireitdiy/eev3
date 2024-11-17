@@ -431,7 +431,7 @@ class MusicViewModel(
     fun loadPlayerData(song: Song, source: PlaylistSource) {
         println("MusicViewModel: 开始播放 ${song.title}")
         
-        // 更新播放列表来源和索引
+        // 更播放列表来源和索
         currentPlaylistSource = source
         val playlist = currentPlaylist
         currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
@@ -654,7 +654,7 @@ class MusicViewModel(
             }
         }
         
-        // 启动前台服���前先检查 PlayerData
+        // 启动前台服前先检查 PlayerData
         val playerData = _currentPlayerData.value
         if (playerData == null) {
             println("MusicViewModel: 当前没有播放数据，不启动服务")
@@ -1006,49 +1006,35 @@ class MusicViewModel(
 
     // 修改 checkSongStatus 方法
     fun checkSongStatus(song: Song): DownloadStatus {
-        // 检查是否已下载到外部存储
+        // 检查音乐文件
         val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
         val sanitizedTitle = sanitizeFileName(song.title)
         val downloadedFile = File(downloadDir, "$sanitizedTitle.mp3")
         
-        // 检查是否已缓存
+        // 检查 MV 文件
+        val mvDownloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val downloadedMV = File(mvDownloadDir, "$sanitizedTitle.mp4")
+        
+        // 检查缓存状态
         val isCached = musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)
+        val isMVCached = song.hasMV && musicCache.isCached(
+            song.url.substringAfterLast("/").substringBefore(".html"),
+            MusicCache.CacheType.MV
+        )
         
         // 检查是否正在下载
         val isDownloading = _downloadStatus.value[song.url] is DownloadStatus.Downloading
         
-        println("CheckSongStatus for ${song.title}:")
-        println("- 下载文件存在: ${downloadedFile.exists()}")
-        println("- 下载文件路径: ${downloadedFile.absolutePath}")
-        println("- 应用内已缓存: $isCached")
-        println("- 正在下载中: $isDownloading")
-        
         return when {
-            // 正在下载中
-            isDownloading -> {
-                println("- 状态: 正在下载")
-                DownloadStatus.Downloading
-            }
-            // 已下载到外部存储且已缓存
-            downloadedFile.exists() && isCached -> {
-                println("- 状态: 已下载且已缓存")
-                DownloadStatus.Success(downloadedFile.absolutePath, true)
-            }
-            // 仅下载到外部存储
-            downloadedFile.exists() -> {
-                println("- 状态: 仅下载")
-                DownloadStatus.Success(downloadedFile.absolutePath, false)
-            }
-            // 仅缓存在应用内
-            isCached -> {
-                println("- 状态: 仅缓存")
-                DownloadStatus.Success(musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC), true)
-            }
-            // 未下载也未缓存
-            else -> {
-                println("- 状态: 未开始")
-                DownloadStatus.NotStarted
-            }
+            isDownloading -> DownloadStatus.Downloading
+            else -> DownloadStatus.Success(
+                path = if (downloadedFile.exists()) downloadedFile.absolutePath 
+                       else if (isCached) musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC)
+                       else "",
+                isCached = isCached,
+                hasMVCached = isMVCached,
+                hasMVDownloaded = downloadedMV.exists()
+            )
         }
     }
 
@@ -1342,6 +1328,88 @@ class MusicViewModel(
                 )
             } finally {
                 _mvCaching.value = false
+            }
+        }
+    }
+
+    // 下载 MV
+    fun downloadMV(song: Song) {
+        if (!song.hasMV) return
+        
+        viewModelScope.launch {
+            try {
+                println("MusicViewModel: 开始下载 MV ${song.title}")
+                _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
+                
+                withContext(Dispatchers.IO) {
+                    val songId = song.url.substringAfterLast("/").substringBefore(".html")
+                    
+                    // 获取下载目录
+                    val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                    downloadDir.mkdirs()
+                    
+                    // 准备目标文件名
+                    val sanitizedTitle = sanitizeFileName(song.title)
+                    val targetFile = File(downloadDir, "$sanitizedTitle.mp4")
+                    
+                    // 检查是否已缓存
+                    val cacheFile = File(context.cacheDir, "mv/$songId.mp4")
+                    if (cacheFile.exists()) {
+                        println("MusicViewModel: 使用缓存的 MV")
+                        // 复制到下载目录
+                        println("MusicViewModel: 复制到下载目录")
+                        cacheFile.copyTo(targetFile, overwrite = true)
+                    } else {
+                        println("MusicViewModel: 从服务器下载")
+                        // 获取 MV 真实地址并下载
+                        val mvUrl = musicCache.getMVUrl(songId)
+                        println("MusicViewModel: 获取到 MV 地址: $mvUrl")
+                        
+                        // 缓存 MV
+                        val cacheUri = musicCache.cacheMV(songId, mvUrl)
+                        println("MusicViewModel: MV 缓存完成")
+                        
+                        // 复制到下载目录
+                        println("MusicViewModel: 复制到下载目录")
+                        File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
+                    }
+                    
+                    // 确保文件已经复制成功
+                    if (targetFile.exists() && targetFile.length() > 0) {
+                        println("MusicViewModel: MV 下载完成 path=${targetFile.absolutePath}")
+                        // 通知系统媒体库更新
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(targetFile.absolutePath),
+                            arrayOf("video/mp4"),
+                            null
+                        )
+                        
+                        // 更新下载状态
+                        _downloadStatus.update { 
+                            it + (song.url to DownloadStatus.Success(
+                                path = targetFile.absolutePath,
+                                isCached = true,
+                                hasMVCached = true,
+                                hasMVDownloaded = true
+                            ))
+                        }
+                        
+                        _downloadTip.value = DownloadTip(
+                            message = "MV 下载完成",
+                            path = targetFile.absolutePath
+                        )
+                    } else {
+                        throw Exception("MV 文件复制失败")
+                    }
+                }
+            } catch (e: Exception) {
+                println("MusicViewModel: MV 下载失败 error=${e.message}")
+                e.printStackTrace()
+                _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
+                _downloadTip.value = DownloadTip(
+                    message = "MV 下载失败: ${e.message ?: "未知错误"}"
+                )
             }
         }
     }

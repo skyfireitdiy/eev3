@@ -197,8 +197,10 @@ fun MusicPlayerApp(
                                                 },
                                                 onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                 onDownloadClick = { viewModel.downloadSong(song.song) },
+                                                onPlayMVClick = { viewModel.playMV(song.song) },
+                                                onDownloadMVClick = { viewModel.downloadMV(song.song) },
                                                 downloadStatus = viewModel.checkSongStatus(song.song),
-                                                onPlayMVClick = { viewModel.playMV(song.song) }
+                                                modifier = Modifier.padding(vertical = 4.dp)
                                             )
                                         }
                                     }
@@ -242,9 +244,10 @@ fun MusicPlayerApp(
                                                     },
                                                     onFavoriteClick = { viewModel.toggleFavorite(song) },
                                                     onDownloadClick = { viewModel.downloadSong(song.song) },
+                                                    onPlayMVClick = { viewModel.playMV(song.song) },
+                                                    onDownloadMVClick = { viewModel.downloadMV(song.song) },
                                                     downloadStatus = viewModel.checkSongStatus(song.song),
-                                                    modifier = Modifier.padding(vertical = 4.dp),
-                                                    onPlayMVClick = { viewModel.playMV(song.song) }
+                                                    modifier = Modifier.padding(vertical = 4.dp)
                                                 )
                                             }
                                             
@@ -495,6 +498,8 @@ private fun RankListPage(
                 onSongClick = { onSongClick(song) },
                 onFavoriteClick = { onFavoriteClick(song) },
                 onDownloadClick = { onDownloadClick(song) },
+                onPlayMVClick = { viewModel.playMV(song.song) },
+                onDownloadMVClick = { viewModel.downloadMV(song.song) },
                 downloadStatus = viewModel.checkSongStatus(song.song),
                 modifier = Modifier.padding(vertical = 4.dp)
             )
