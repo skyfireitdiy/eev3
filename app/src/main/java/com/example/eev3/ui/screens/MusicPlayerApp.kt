@@ -184,7 +184,7 @@ fun MusicPlayerApp(
                                                 song = song,
                                                 onSongClick = {
                                                     currentSong = song.song
-                                                    viewModel.loadPlayerData(song.song)
+                                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.FAVORITES)
                                                     showPlayer = true
                                                 },
                                                 onFavoriteClick = { viewModel.toggleFavorite(song) },
@@ -227,7 +227,7 @@ fun MusicPlayerApp(
                                                     song = song,
                                                     onSongClick = {
                                                         currentSong = song.song
-                                                        viewModel.loadPlayerData(song.song)
+                                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.SEARCH)
                                                         showPlayer = true
                                                     },
                                                     onFavoriteClick = { viewModel.toggleFavorite(song) },
@@ -287,7 +287,7 @@ fun MusicPlayerApp(
                                     onLoadMore = { viewModel.loadMoreRank() },
                                     onSongClick = { song ->
                                         currentSong = song.song
-                                        viewModel.loadPlayerData(song.song)
+                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.NEW_RANK)
                                         showPlayer = true
                                     },
                                     onFavoriteClick = { viewModel.toggleFavorite(it) },
@@ -307,7 +307,7 @@ fun MusicPlayerApp(
                                     onLoadMore = { viewModel.loadMoreRank() },
                                     onSongClick = { song ->
                                         currentSong = song.song
-                                        viewModel.loadPlayerData(song.song)
+                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.TOP_RANK)
                                         showPlayer = true
                                     },
                                     onFavoriteClick = { viewModel.toggleFavorite(it) },
@@ -327,7 +327,7 @@ fun MusicPlayerApp(
                                     onLoadMore = { viewModel.loadMoreRank() },
                                     onSongClick = { song ->
                                         currentSong = song.song
-                                        viewModel.loadPlayerData(song.song)
+                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.DJ_DANCE)
                                         showPlayer = true
                                     },
                                     onFavoriteClick = { viewModel.toggleFavorite(it) },

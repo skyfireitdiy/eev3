@@ -93,10 +93,28 @@ class MusicViewModel(
     private val _playMode = MutableStateFlow(PlayMode.SEQUENCE)
     val playMode: StateFlow<PlayMode> = _playMode
 
-    // 添加播放列表相关的状态
+    // 添加播放列表来源枚举
+    enum class PlaylistSource {
+        FAVORITES,   // 收藏列表
+        SEARCH,      // 搜索结果
+        NEW_RANK,    // 新歌榜
+        TOP_RANK,    // TOP榜单
+        DJ_DANCE     // DJ舞曲
+    }
+
+    // 当前播放列表来源
+    private var currentPlaylistSource = PlaylistSource.FAVORITES
     private var currentPlayingIndex = -1
-    private val playList: List<Song>
-        get() = _favorites.value.map { it.song }
+
+    // 修改播放列表获取逻辑
+    private val currentPlaylist: List<Song>
+        get() = when (currentPlaylistSource) {
+            PlaylistSource.FAVORITES -> _favorites.value.map { it.song }
+            PlaylistSource.SEARCH -> _searchResults.value.map { it.song }
+            PlaylistSource.NEW_RANK, 
+            PlaylistSource.TOP_RANK,
+            PlaylistSource.DJ_DANCE -> _rankSongs.value.map { it.song }
+        }
 
     // 添加播放失败处理的状态
     sealed class PlaybackError {
@@ -351,11 +369,12 @@ class MusicViewModel(
         val url: String
     )
 
-    fun loadPlayerData(song: Song) {
-        println("MusicViewModel: 开始加载歌曲 title=${song.title}")
+    fun loadPlayerData(song: Song, source: PlaylistSource) {
+        println("MusicViewModel: 开始加载歌曲 title=${song.title}, source=$source")
         
-        // 更新当前播放和状态
-        currentPlayingIndex = playList.indexOfFirst { it.url == song.url }
+        // 更新播放列表来源和索引
+        currentPlaylistSource = source
+        currentPlayingIndex = currentPlaylist.indexOfFirst { it.url == song.url }
         _currentPlayingSongState.value = song
         
         // 如果是同一首歌，直接返回
@@ -437,7 +456,7 @@ class MusicViewModel(
                                     val finalUrl = musicCache.cacheMusic(song.url, audioUrl)
                                     println("MusicViewModel: 音乐缓存完成 finalUrl=$finalUrl")
                                     
-                                    println("MusicViewModel: 开始缓存封���")
+                                    println("MusicViewModel: 开始缓存封面")
                                     // 缓存封面
                                     val coverUrl = playResponse.pic
                                     val finalCoverUrl = musicCache.cacheCover(song.url, coverUrl)
@@ -552,8 +571,9 @@ class MusicViewModel(
                         when (_playMode.value) {
                             PlayMode.SEQUENCE -> {
                                 // 顺序播放，播放下一首
-                                val nextIndex = (currentPlayingIndex + 1) % playList.size
-                                loadPlayerData(playList[nextIndex])
+                                val nextIndex = if (currentPlayingIndex + 1 >= currentPlaylist.size) 0 
+                                              else currentPlayingIndex + 1
+                                loadPlayerData(currentPlaylist[nextIndex], currentPlaylistSource)
                             }
                             PlayMode.SINGLE_LOOP -> {
                                 // 单曲循环，重新播放当前歌曲
@@ -562,8 +582,8 @@ class MusicViewModel(
                             }
                             PlayMode.RANDOM -> {
                                 // 随机播放，随机选择一首
-                                val nextIndex = (0 until playList.size).random()
-                                loadPlayerData(playList[nextIndex])
+                                val nextIndex = (0 until currentPlaylist.size).random()
+                                loadPlayerData(currentPlaylist[nextIndex], currentPlaylistSource)
                             }
                             PlayMode.ONCE -> {
                                 // 单次播放，不做任何操作
@@ -625,7 +645,7 @@ class MusicViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        // 停止务
+        // 停止
         context.stopService(Intent(context, MusicService::class.java))
         
         // 取消注册广播接收器
@@ -659,22 +679,23 @@ class MusicViewModel(
     }
 
     fun playNext() {
-        if (playList.isEmpty()) return
+        val playlist = currentPlaylist
+        if (playlist.isEmpty()) return
         
         when (_playMode.value) {
             PlayMode.SEQUENCE -> {
                 // 顺序播放，播放下一首
-                val nextIndex = (currentPlayingIndex + 1) % playList.size
-                loadPlayerData(playList[nextIndex])
+                val nextIndex = (currentPlayingIndex + 1) % playlist.size
+                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
             }
             PlayMode.SINGLE_LOOP -> {
                 // 单曲循环，重新播放当前歌曲
-                currentPlayingSong?.let { loadPlayerData(it) }
+                currentPlayingSong?.let { loadPlayerData(it, currentPlaylistSource) }
             }
             PlayMode.RANDOM -> {
                 // 随机播放，随机选择一首
-                val nextIndex = (0 until playList.size).random()
-                loadPlayerData(playList[nextIndex])
+                val nextIndex = (0 until playlist.size).random()
+                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
             }
             PlayMode.ONCE -> {
                 // 单次播放，不做任何操作
@@ -683,35 +704,36 @@ class MusicViewModel(
     }
 
     fun playPrevious() {
-        if (playList.isEmpty()) return
+        val playlist = currentPlaylist
+        if (playlist.isEmpty()) return
         
         when (_playMode.value) {
             PlayMode.SEQUENCE -> {
-                // 顺序放，播上一首
+                // 顺序播放，播放上一首
                 val previousIndex = if (currentPlayingIndex > 0) {
                     currentPlayingIndex - 1
                 } else {
-                    playList.size - 1
+                    playlist.size - 1
                 }
-                loadPlayerData(playList[previousIndex])
+                loadPlayerData(playlist[previousIndex], currentPlaylistSource)
             }
             PlayMode.SINGLE_LOOP -> {
                 // 单曲循环，重新播放当前歌曲
-                currentPlayingSong?.let { loadPlayerData(it) }
+                currentPlayingSong?.let { loadPlayerData(it, currentPlaylistSource) }
             }
             PlayMode.RANDOM -> {
-                // 随机播放，随机选一首
-                val nextIndex = (0 until playList.size).random()
-                loadPlayerData(playList[nextIndex])
+                // 随机播放，随机选择一首
+                val nextIndex = (0 until playlist.size).random()
+                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
             }
             PlayMode.ONCE -> {
                 // 单次播放模式下也允许切换到上一首
                 val previousIndex = if (currentPlayingIndex > 0) {
                     currentPlayingIndex - 1
                 } else {
-                    playList.size - 1
+                    playlist.size - 1
                 }
-                loadPlayerData(playList[previousIndex])
+                loadPlayerData(playlist[previousIndex], currentPlaylistSource)
             }
         }
     }
