@@ -40,6 +40,7 @@ import android.os.Environment
 import com.example.eev3.data.DownloadStatus
 import android.net.Uri
 import androidx.core.content.FileProvider
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
 class MusicViewModel(
     private val favoritesDataStore: FavoritesDataStore,
@@ -177,7 +178,7 @@ class MusicViewModel(
         DJ_DANCE    // DJ舞曲
     }
 
-    // 添加榜单相关状态
+    // ���加榜单相关状态
     private val _rankSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
     val rankSongs: StateFlow<List<ObservableSong>> = _rankSongs
 
@@ -242,6 +243,9 @@ class MusicViewModel(
     private val _mvCaching = MutableStateFlow(false)
     val mvCaching: StateFlow<Boolean> = _mvCaching
 
+    // 添加广播接收器变量
+    private var controlReceiver: BroadcastReceiver? = null
+
     init {
         // 加载保存的收藏
         viewModelScope.launch {
@@ -262,6 +266,8 @@ class MusicViewModel(
             
             override fun onIsPlayingChanged(playing: Boolean) {
                 _isPlaying.value = playing
+                // 播放状态改变时更新通知栏
+                updateNotification()
             }
         })
 
@@ -270,6 +276,61 @@ class MusicViewModel(
 
         // 注册耳机插拔监听器
         registerHeadsetReceiver()
+
+        // 注册广播接收器
+        val filter = IntentFilter().apply {
+            addAction(MusicService.BROADCAST_PREVIOUS)
+            addAction(MusicService.BROADCAST_PLAY_PAUSE)
+            addAction(MusicService.BROADCAST_NEXT)
+            addAction(MusicService.BROADCAST_FAVORITE)
+        }
+        
+        // 创建广播接收器
+        controlReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                println("MusicViewModel: 收到广播: ${intent?.action}")
+                when (intent?.action) {
+                    MusicService.BROADCAST_PREVIOUS -> {
+                        println("MusicViewModel: 播放上一首")
+                        viewModelScope.launch(Dispatchers.Main) {
+                            playPrevious()
+                            // 更新通知栏
+                            updateNotification()
+                        }
+                    }
+                    MusicService.BROADCAST_PLAY_PAUSE -> {
+                        println("MusicViewModel: 切换播放状态")
+                        viewModelScope.launch(Dispatchers.Main) {
+                            playPause()
+                            // 更新通知栏
+                            updateNotification()
+                        }
+                    }
+                    MusicService.BROADCAST_NEXT -> {
+                        println("MusicViewModel: 播放下一首")
+                        viewModelScope.launch(Dispatchers.Main) {
+                            playNext()
+                            // 更新通知栏
+                            updateNotification()
+                        }
+                    }
+                    MusicService.BROADCAST_FAVORITE -> {
+                        println("MusicViewModel: 切换收藏状态")
+                        currentPlayingSong?.let { song ->
+                            viewModelScope.launch(Dispatchers.Main) {
+                                toggleFavorite(ObservableSong(song))
+                                // 更新通知栏
+                                updateNotification()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 使用 LocalBroadcastManager 注册广播接收器
+        LocalBroadcastManager.getInstance(context)
+            .registerReceiver(controlReceiver!!, filter)
     }
 
     private fun registerHeadsetReceiver() {
@@ -626,6 +687,7 @@ class MusicViewModel(
             exoPlayer?.let { player ->
                 _currentPosition.value = player.currentPosition
                 _duration.value = player.duration
+                _isPlaying.value = player.isPlaying
             }
             return
         }
@@ -634,28 +696,27 @@ class MusicViewModel(
         
         // 初始化播放器
         exoPlayer?.release()
-        exoPlayer = ExoPlayer.Builder(context).build()
-        
-        exoPlayer?.let { player ->
-            player.setMediaItem(MediaItem.fromUri(audioUrl))
-            player.prepare()
+        exoPlayer = ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(audioUrl))
+            prepare()
             
-            val playerListener = object : Player.Listener {
+            addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
                     if (state == Player.STATE_READY) {
-                        _duration.value = player.duration
-                        player.play()  // 准备就绪后开始播放
+                        _duration.value = duration
+                        play()  // 准备就绪后开始播放
+                        _isPlaying.value = true  // 更新播放状态
                     } else if (state == Player.STATE_ENDED) {
                         handlePlaybackEnd()
                     }
                 }
                 
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    _isPlaying.value = isPlaying
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    _isPlaying.value = playing
+                    // 播放状态改变时更新通知栏
+                    updateNotification()
                 }
-            }
-            
-            player.addListener(playerListener)
+            })
         }
         
         // 启动进度更新
@@ -686,6 +747,10 @@ class MusicViewModel(
             println("- 音频URL: ${playerData.audioUrl}")
             println("- 封面: ${playerData.coverImage}")
             putExtra(MusicService.EXTRA_PLAYER_DATA, playerData)
+            putExtra("isPlaying", exoPlayer?.isPlaying ?: false)
+            putExtra("isFavorite", currentPlayingSong?.let { song ->
+                favorites.value.any { it.song.url == song.url }
+            } ?: false)
         }
         
         println("MusicViewModel: 开始启动服务")
@@ -711,6 +776,8 @@ class MusicViewModel(
             } else {
                 it.play()
             }
+            // 立即更新通知栏
+            updateNotification()
         }
     }
     
@@ -726,7 +793,7 @@ class MusicViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        // 停止
+        // 停止服务
         context.stopService(Intent(context, MusicService::class.java))
         
         // 取消注册广播接收器
@@ -734,6 +801,13 @@ class MusicViewModel(
             context.unregisterReceiver(it)
         }
         headsetReceiver = null
+        
+        // 使用 LocalBroadcastManager 取消注册广播接收器
+        controlReceiver?.let {
+            LocalBroadcastManager.getInstance(context)
+                .unregisterReceiver(it)
+        }
+        controlReceiver = null
         
         exoPlayer?.release()
         exoPlayer = null
@@ -790,7 +864,7 @@ class MusicViewModel(
         
         when (_playMode.value) {
             PlayMode.SEQUENCE -> {
-                // 顺序播放，播放上一首
+                // 顺序放，播放上一首
                 val previousIndex = if (currentPlayingIndex > 0) {
                     currentPlayingIndex - 1
                 } else {
@@ -944,7 +1018,7 @@ class MusicViewModel(
                     if (musicCache.isCached(song.url, MusicCache.CacheType.MUSIC)) {
                         println("MusicViewModel: 使用缓存的音乐文件")
                         // 复制到下载目录
-                        println("MusicViewModel: 复制到下��目录")
+                        println("MusicViewModel: 复制到下载目录")
                         val cacheUri = musicCache.getCacheFileUri(song.url, MusicCache.CacheType.MUSIC)
                         File(URI(cacheUri)).copyTo(targetFile, overwrite = true)
                     } else {
@@ -1001,7 +1075,7 @@ class MusicViewModel(
                         }
                         
                         _downloadTip.value = DownloadTip(
-                            message = "下载完成",
+                            message = "下载成",
                             path = targetFile.absolutePath
                         )
                     } else {
@@ -1303,7 +1377,7 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
-                // 如���有音乐在播放，先暂停
+                // 如有音乐在播放，先暂停
                 if (exoPlayer?.isPlaying == true) {
                     println("MusicViewModel: 暂停音乐播放")
                     exoPlayer?.pause()
@@ -1331,7 +1405,7 @@ class MusicViewModel(
                     
                     // 显示提示
                     _downloadTip.value = DownloadTip(
-                        message = "正在播放已下载的 MV"
+                        message = "正在播放已��载的 MV"
                     )
                     
                     // 启动播放器
@@ -1405,7 +1479,7 @@ class MusicViewModel(
                 
                 // 显示开始下载提示
                 _downloadTip.value = DownloadTip(
-                    message = "开始下载 MV，由于文件较大，可能需要一些时间，请耐心等待..."
+                    message = "开始下载 MV，由于文件较，可能需要一些时间，请耐心等待..."
                 )
                 
                 withContext(Dispatchers.IO) {
@@ -1484,6 +1558,30 @@ class MusicViewModel(
                     message = "MV 下载失败: ${e.message ?: "未知错误"}"
                 )
             }
+        }
+    }
+
+    // 修改 updateNotification 方法
+    private fun updateNotification() {
+        // 更新前台服务的通知
+        val serviceIntent = Intent(context, MusicService::class.java).apply {
+            putExtra(MusicService.EXTRA_PLAYER_DATA, _currentPlayerData.value)
+            // 使用 StateFlow 中的播放状态
+            putExtra("isPlaying", _isPlaying.value)
+            putExtra("isFavorite", currentPlayingSong?.let { song ->
+                _favorites.value.any { it.song.url == song.url }
+            } ?: false)
+        }
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            println("MusicViewModel: 更新通知失败: ${e.message}")
+            e.printStackTrace()
         }
     }
 }
