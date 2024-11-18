@@ -99,4 +99,8 @@ dependencies {
 
     // LocalBroadcastManager
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+
+    // Material Icons
+    implementation("androidx.compose.material:material-icons-core:1.6.1")
+    implementation("androidx.compose.material:material-icons-extended:1.6.1")
 }

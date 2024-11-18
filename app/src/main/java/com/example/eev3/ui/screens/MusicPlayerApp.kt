@@ -11,6 +11,9 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +45,9 @@ fun MusicPlayerApp(
     var searchQuery by remember { mutableStateOf("") }
     var currentSong by remember { mutableStateOf<Song?>(null) }
     var showPlayer by remember { mutableStateOf(false) }
+    
+    // 使用 Int 来表示当前页面
+    var currentPage by remember { mutableStateOf(0) }
     
     // 创建 pager 状态，初始页面设为收藏页面（索引1）
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 5 })
@@ -122,7 +128,7 @@ fun MusicPlayerApp(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = when (pagerState.currentPage) {
+                                text = when (currentPage) {
                                     0 -> "收藏列表"
                                     1 -> "搜索列表"
                                     2 -> "新歌榜"
@@ -136,7 +142,6 @@ fun MusicPlayerApp(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 显示缓存大小和清除按钮
                                 Text(
                                     text = "缓存: ${viewModel.formatCacheSize(cacheSize)}",
                                     style = MaterialTheme.typography.bodyMedium
@@ -146,20 +151,55 @@ fun MusicPlayerApp(
                                 ) {
                                     Text("清除")
                                 }
-                                IconButton(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(if (pagerState.currentPage == 1) 0 else 1)
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (pagerState.currentPage == 1) Icons.Default.Favorite else Icons.Default.Search,
-                                        contentDescription = if (pagerState.currentPage == 1) "Show favorites" else "Show search",
-                                        tint = ChineseRed
-                                    )
-                                }
                             }
+                        }
+                    }
+                },
+                bottomBar = {
+                    Column {
+                        // 添加播放控制条
+                        if (currentPlayingSong != null) {
+                            PlayerControls(
+                                song = currentPlayingSong!!,
+                                onClick = { 
+                                    showPlayer = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        
+                        // 底部导航栏
+                        NavigationBar {
+                            NavigationBarItem(
+                                icon = { Icon(Icons.Default.Favorite, contentDescription = "收藏") },
+                                label = { Text("收藏") },
+                                selected = currentPage == 0,
+                                onClick = { currentPage = 0 }
+                            )
+                            NavigationBarItem(
+                                icon = { Icon(Icons.Default.Search, contentDescription = "搜索") },
+                                label = { Text("搜索") },
+                                selected = currentPage == 1,
+                                onClick = { currentPage = 1 }
+                            )
+                            NavigationBarItem(
+                                icon = { Icon(Icons.Default.Star, contentDescription = "新歌") },
+                                label = { Text("新歌") },
+                                selected = currentPage == 2,
+                                onClick = { currentPage = 2 }
+                            )
+                            NavigationBarItem(
+                                icon = { Icon(Icons.Default.List, contentDescription = "TOP") },
+                                label = { Text("TOP") },
+                                selected = currentPage == 3,
+                                onClick = { currentPage = 3 }
+                            )
+                            NavigationBarItem(
+                                icon = { Icon(Icons.Default.MusicNote, contentDescription = "DJ") },
+                                label = { Text("DJ") },
+                                selected = currentPage == 4,
+                                onClick = { currentPage = 4 }
+                            )
                         }
                     }
                 },
@@ -170,29 +210,72 @@ fun MusicPlayerApp(
                         .fillMaxSize()
                         .padding(paddingValues)
                 ) {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.weight(1f)
-                    ) { page ->
-                        when (page) {
-                            0 -> {
-                                // 收藏页面
-                                Box(
+                    when (currentPage) {
+                        0 -> {
+                            // 收藏页面
+                            Box(
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(0.dp),
+                                    verticalArrangement = Arrangement.Top,
+                                    userScrollEnabled = true
+                                ) {
+                                    items(favorites) { song ->
+                                        SongItem(
+                                            song = song,
+                                            onSongClick = {
+                                                lastPageBeforePlayer = currentPage // 记录当前页面
+                                                currentSong = song.song
+                                                viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.FAVORITES)
+                                                showPlayer = true
+                                            },
+                                            onFavoriteClick = { viewModel.toggleFavorite(song) },
+                                            onDownloadClick = { viewModel.downloadSong(song.song) },
+                                            onPlayMVClick = { viewModel.playMV(song.song) },
+                                            onDownloadMVClick = { viewModel.downloadMV(song.song) },
+                                            downloadStatus = viewModel.checkSongStatus(song.song),
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        1 -> {
+                            // 搜索页面
+                            Box(
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Column(
                                     modifier = Modifier.fillMaxSize()
                                 ) {
+                                    SearchBar(
+                                        query = searchQuery,
+                                        onQueryChange = { searchQuery = it },
+                                        onSearch = {
+                                            if (searchQuery.isNotEmpty()) {
+                                                viewModel.searchSongs(searchQuery)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp)
+                                    )
+                                    
                                     LazyColumn(
                                         modifier = Modifier.fillMaxWidth(),
                                         contentPadding = PaddingValues(0.dp),
                                         verticalArrangement = Arrangement.Top,
                                         userScrollEnabled = true
                                     ) {
-                                        items(favorites) { song ->
+                                        items(searchResults) { song ->
                                             SongItem(
                                                 song = song,
                                                 onSongClick = {
-                                                    lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
+                                                    lastPageBeforePlayer = currentPage // 记录当前页面
                                                     currentSong = song.song
-                                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.FAVORITES)
+                                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.SEARCH)
                                                     showPlayer = true
                                                 },
                                                 onFavoriteClick = { viewModel.toggleFavorite(song) },
@@ -203,84 +286,36 @@ fun MusicPlayerApp(
                                                 modifier = Modifier.padding(vertical = 4.dp)
                                             )
                                         }
-                                    }
-                                }
-                            }
-                            1 -> {
-                                // 搜索页面
-                                Box(
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    Column(
-                                        modifier = Modifier.fillMaxSize()
-                                    ) {
-                                        SearchBar(
-                                            query = searchQuery,
-                                            onQueryChange = { searchQuery = it },
-                                            onSearch = {
-                                                if (searchQuery.isNotEmpty()) {
-                                                    viewModel.searchSongs(searchQuery)
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(16.dp)
-                                        )
                                         
-                                        LazyColumn(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentPadding = PaddingValues(0.dp),
-                                            verticalArrangement = Arrangement.Top,
-                                            userScrollEnabled = true
-                                        ) {
-                                            items(searchResults) { song ->
-                                                SongItem(
-                                                    song = song,
-                                                    onSongClick = {
-                                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
-                                                        currentSong = song.song
-                                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.SEARCH)
-                                                        showPlayer = true
-                                                    },
-                                                    onFavoriteClick = { viewModel.toggleFavorite(song) },
-                                                    onDownloadClick = { viewModel.downloadSong(song.song) },
-                                                    onPlayMVClick = { viewModel.playMV(song.song) },
-                                                    onDownloadMVClick = { viewModel.downloadMV(song.song) },
-                                                    downloadStatus = viewModel.checkSongStatus(song.song),
-                                                    modifier = Modifier.padding(vertical = 4.dp)
-                                                )
-                                            }
+                                        // 添加加载更多项
+                                        item {
+                                            val loadingMore by viewModel.loadingMore.collectAsStateWithLifecycle()
+                                            val reachedEnd by viewModel.reachedEnd.collectAsStateWithLifecycle()
                                             
-                                            // 添加加载更多项
-                                            item {
-                                                val loadingMore by viewModel.loadingMore.collectAsStateWithLifecycle()
-                                                val reachedEnd by viewModel.reachedEnd.collectAsStateWithLifecycle()
-                                                
-                                                if (searchResults.isNotEmpty()) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(16.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        if (loadingMore) {
-                                                            CircularProgressIndicator(
-                                                                modifier = Modifier.size(24.dp),
-                                                                color = ChineseRed
-                                                            )
-                                                        } else if (reachedEnd) {
-                                                            Text(
-                                                                text = "已经到底了",
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                                            )
-                                                        } else {
-                                                            // 如果不是在加载中且没有到底，显示加载更多按钮
-                                                            TextButton(
-                                                                onClick = { viewModel.loadMore() }
-                                                            ) {
-                                                                Text("加载更多")
-                                                            }
+                                            if (searchResults.isNotEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(16.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (loadingMore) {
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier.size(24.dp),
+                                                            color = ChineseRed
+                                                        )
+                                                    } else if (reachedEnd) {
+                                                        Text(
+                                                            text = "已经到底了",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                                        )
+                                                    } else {
+                                                        // 如果不是在加载中且没有到底，显示加载更多按钮
+                                                        TextButton(
+                                                            onClick = { viewModel.loadMore() }
+                                                        ) {
+                                                            Text("加载更多")
                                                         }
                                                     }
                                                 }
@@ -289,80 +324,70 @@ fun MusicPlayerApp(
                                     }
                                 }
                             }
-                            2 -> {
-                                // 新歌榜
-                                LaunchedEffect(Unit) {
-                                    viewModel.loadRankSongs(MusicViewModel.RankType.NEW)
-                                }
-                                RankListPage(
-                                    songs = viewModel.newRankSongs.collectAsStateWithLifecycle(emptyList()).value,
-                                    loadingMore = viewModel.newRankLoadingMore.collectAsStateWithLifecycle().value,
-                                    reachedEnd = viewModel.newRankReachedEnd.collectAsStateWithLifecycle().value,
-                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.NEW) },
-                                    onSongClick = { song ->
-                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
-                                        currentSong = song.song
-                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.NEW_RANK)
-                                        showPlayer = true
-                                    },
-                                    onFavoriteClick = { viewModel.toggleFavorite(it) },
-                                    onDownloadClick = { viewModel.downloadSong(it.song) },
-                                    viewModel = viewModel
-                                )
-                            }
-                            3 -> {
-                                // TOP榜单
-                                LaunchedEffect(Unit) {
-                                    viewModel.loadRankSongs(MusicViewModel.RankType.TOP)
-                                }
-                                RankListPage(
-                                    songs = viewModel.topRankSongs.collectAsStateWithLifecycle(emptyList()).value,
-                                    loadingMore = viewModel.topRankLoadingMore.collectAsStateWithLifecycle().value,
-                                    reachedEnd = viewModel.topRankReachedEnd.collectAsStateWithLifecycle().value,
-                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.TOP) },
-                                    onSongClick = { song ->
-                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
-                                        currentSong = song.song
-                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.TOP_RANK)
-                                        showPlayer = true
-                                    },
-                                    onFavoriteClick = { viewModel.toggleFavorite(it) },
-                                    onDownloadClick = { viewModel.downloadSong(it.song) },
-                                    viewModel = viewModel
-                                )
-                            }
-                            4 -> {
-                                // DJ舞曲
-                                LaunchedEffect(Unit) {
-                                    viewModel.loadRankSongs(MusicViewModel.RankType.DJ_DANCE)
-                                }
-                                RankListPage(
-                                    songs = viewModel.djDanceSongs.collectAsStateWithLifecycle(emptyList()).value,
-                                    loadingMore = viewModel.djDanceLoadingMore.collectAsStateWithLifecycle().value,
-                                    reachedEnd = viewModel.djDanceReachedEnd.collectAsStateWithLifecycle().value,
-                                    onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.DJ_DANCE) },
-                                    onSongClick = { song ->
-                                        lastPageBeforePlayer = pagerState.currentPage // 记录当前页面
-                                        currentSong = song.song
-                                        viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.DJ_DANCE)
-                                        showPlayer = true
-                                    },
-                                    onFavoriteClick = { viewModel.toggleFavorite(it) },
-                                    onDownloadClick = { viewModel.downloadSong(it.song) },
-                                    viewModel = viewModel
-                                )
-                            }
                         }
-                    }
-
-                    if (currentPlayingSong != null) {
-                        PlayerControls(
-                            song = currentPlayingSong!!,
-                            onClick = { 
-                                showPlayer = true
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        2 -> {
+                            // 新歌榜
+                            LaunchedEffect(Unit) {
+                                viewModel.loadRankSongs(MusicViewModel.RankType.NEW)
+                            }
+                            RankListPage(
+                                songs = viewModel.newRankSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                loadingMore = viewModel.newRankLoadingMore.collectAsStateWithLifecycle().value,
+                                reachedEnd = viewModel.newRankReachedEnd.collectAsStateWithLifecycle().value,
+                                onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.NEW) },
+                                onSongClick = { song ->
+                                    lastPageBeforePlayer = currentPage
+                                    currentSong = song.song
+                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.NEW_RANK)
+                                    showPlayer = true
+                                },
+                                onFavoriteClick = { viewModel.toggleFavorite(it) },
+                                onDownloadClick = { viewModel.downloadSong(it.song) },
+                                viewModel = viewModel
+                            )
+                        }
+                        3 -> {
+                            // TOP榜单
+                            LaunchedEffect(Unit) {
+                                viewModel.loadRankSongs(MusicViewModel.RankType.TOP)
+                            }
+                            RankListPage(
+                                songs = viewModel.topRankSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                loadingMore = viewModel.topRankLoadingMore.collectAsStateWithLifecycle().value,
+                                reachedEnd = viewModel.topRankReachedEnd.collectAsStateWithLifecycle().value,
+                                onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.TOP) },
+                                onSongClick = { song ->
+                                    lastPageBeforePlayer = currentPage
+                                    currentSong = song.song
+                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.TOP_RANK)
+                                    showPlayer = true
+                                },
+                                onFavoriteClick = { viewModel.toggleFavorite(it) },
+                                onDownloadClick = { viewModel.downloadSong(it.song) },
+                                viewModel = viewModel
+                            )
+                        }
+                        4 -> {
+                            // DJ舞曲
+                            LaunchedEffect(Unit) {
+                                viewModel.loadRankSongs(MusicViewModel.RankType.DJ_DANCE)
+                            }
+                            RankListPage(
+                                songs = viewModel.djDanceSongs.collectAsStateWithLifecycle(emptyList()).value,
+                                loadingMore = viewModel.djDanceLoadingMore.collectAsStateWithLifecycle().value,
+                                reachedEnd = viewModel.djDanceReachedEnd.collectAsStateWithLifecycle().value,
+                                onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.DJ_DANCE) },
+                                onSongClick = { song ->
+                                    lastPageBeforePlayer = currentPage
+                                    currentSong = song.song
+                                    viewModel.loadPlayerData(song.song, MusicViewModel.PlaylistSource.DJ_DANCE)
+                                    showPlayer = true
+                                },
+                                onFavoriteClick = { viewModel.toggleFavorite(it) },
+                                onDownloadClick = { viewModel.downloadSong(it.song) },
+                                viewModel = viewModel
+                            )
+                        }
                     }
                 }
             }
@@ -390,7 +415,7 @@ fun MusicPlayerApp(
                 AlertDialog(
                     onDismissRequest = { viewModel.clearPlaybackError() },
                     title = { Text("播放失败") },
-                    text = { Text("歌曲《${error.song.title}》播放失败，可能链接已失效。") },
+                    text = { Text("歌曲《${error.song.title}播放失败，可能链接已失效。") },
                     confirmButton = {
                         TextButton(
                             onClick = {
