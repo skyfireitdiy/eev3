@@ -11,8 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.eev3.data.PlayerData
+import com.example.eev3.data.LyricLine
 import com.example.eev3.viewmodel.MusicViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -129,18 +131,23 @@ fun CustomPlayer(
                     } else {
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     },
-                    modifier = Modifier.padding(
-                        vertical = if (isCurrentLyric) {
-                            if (isLyricsFullscreen) 24.dp else 12.dp
-                        } else {
-                            if (isLyricsFullscreen) 16.dp else 8.dp
-                        }
-                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            vertical = if (isCurrentLyric) {
+                                if (isLyricsFullscreen) 24.dp else 12.dp
+                            } else {
+                                if (isLyricsFullscreen) 16.dp else 8.dp
+                            },
+                            horizontal = 16.dp  // 添加水平内边距
+                        ),
                     fontWeight = if (isCurrentLyric) {
                         FontWeight.Bold
                     } else {
                         FontWeight.Normal
-                    }
+                    },
+                    textAlign = TextAlign.Center,  // 设置文本居中对齐
+                    lineHeight = if (isLyricsFullscreen) 32.sp else 24.sp  // 设置行高
                 )
             }
         }
@@ -153,6 +160,38 @@ fun CustomPlayer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            )
+        }
+    }
+}
+
+@Composable
+fun LyricsDisplay(
+    lyrics: List<LyricLine>,
+    currentIndex: Int,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,  // 设置水平居中对齐
+        verticalArrangement = Arrangement.Center
+    ) {
+        items(lyrics.size) { index ->
+            val isCurrentLine = index == currentIndex
+            Text(
+                text = lyrics[index].text,
+                style = MaterialTheme.typography.bodyLarge.copy(  // 使用 bodyLarge 而不是 titleLarge
+                    fontSize = if (isCurrentLine) 20.sp else 16.sp  // 调小字体大小
+                ),
+                color = if (isCurrentLine) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                },
+                textAlign = TextAlign.Center,  // 设置文本居中对齐
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
             )
         }
     }
