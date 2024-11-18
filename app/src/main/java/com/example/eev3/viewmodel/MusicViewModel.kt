@@ -109,7 +109,7 @@ class MusicViewModel(
     private var currentPlaylistSource = PlaylistSource.FAVORITES
     private var currentPlayingIndex = -1
 
-    // 修改播放列表获取逻辑
+    // 修改播放列表取逻辑
     private val currentPlaylist: List<Song>
         get() = when (currentPlaylistSource) {
             PlaylistSource.FAVORITES -> _favorites.value.map { it.song }
@@ -178,7 +178,7 @@ class MusicViewModel(
         DJ_DANCE    // DJ舞曲
     }
 
-    // ���加榜单相关状态
+    // 加榜单相关状态
     private val _rankSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
     val rankSongs: StateFlow<List<ObservableSong>> = _rankSongs
 
@@ -458,23 +458,35 @@ class MusicViewModel(
         }
     }
 
-    fun toggleFavorite(observableSong: ObservableSong) {
-        observableSong.isFavorite = !observableSong.isFavorite
+    fun toggleFavorite(song: ObservableSong) {
+        println("MusicViewModel: 切换收藏状态: ${song.song.title}")
+        println("MusicViewModel: 当前收藏状态: ${song.isFavorite}")
         
+        // 更新收藏列表
         val currentFavorites = _favorites.value.toMutableList()
-        if (observableSong.isFavorite) {
-            if (!currentFavorites.contains(observableSong)) {
-                currentFavorites.add(observableSong)
-            }
+        val existingSong = currentFavorites.find { it.song.url == song.song.url }
+        
+        if (existingSong != null) {
+            // 歌曲已在收藏列表中，移除它
+            println("MusicViewModel: 从收藏中移除")
+            currentFavorites.remove(existingSong)
+            song.isFavorite = false
         } else {
-            currentFavorites.remove(observableSong)
+            // 歌曲不在收藏列表中，添加它
+            println("MusicViewModel: 添加到收藏")
+            song.isFavorite = true
+            currentFavorites.add(song)
         }
+        
         _favorites.value = currentFavorites
         
-        // 保存更新后的藏列表
+        // 保存更新后的收藏列表
         viewModelScope.launch {
             favoritesDataStore.saveFavorites(currentFavorites.map { it.song })
         }
+        
+        // 更新通知栏
+        updateNotification()
     }
 
     fun clearSearchError() {
@@ -946,7 +958,7 @@ class MusicViewModel(
     fun clearCache() {
         viewModelScope.launch {
             try {
-                // 获取当前播放歌曲的URL
+                // ���取当前播放歌曲的URL
                 val currentSongUrl = currentPlayingSong?.url
                 
                 if (currentSongUrl != null) {
@@ -1199,7 +1211,7 @@ class MusicViewModel(
         }
     }
 
-    // 添加内部加载方法
+    // 修改内部加载方法
     private fun loadRankSongsInternal(
         type: RankType,
         page: Int,
@@ -1243,6 +1255,7 @@ class MusicViewModel(
                         return@withContext
                     }
                     
+                    // 解析歌曲列表时检查收藏状态
                     val parsedSongs = songElements.mapNotNull { element ->
                         val nameElement = element.selectFirst(".name a") ?: return@mapNotNull null
                         val title = nameElement.text()
@@ -1269,7 +1282,9 @@ class MusicViewModel(
                         } else ""
                         
                         if (title.isNotEmpty() && songUrl.isNotEmpty()) {
-                            ObservableSong(Song(title, songUrl, hasMV = hasMV, mvUrl = mvUrl))
+                            // 检查是否已收藏
+                            val isFavorite = _favorites.value.any { it.song.url == songUrl }
+                            ObservableSong(Song(title, songUrl, isFavorite = isFavorite, hasMV = hasMV, mvUrl = mvUrl))
                         } else null
                     }
                     
@@ -1405,7 +1420,7 @@ class MusicViewModel(
                     
                     // 显示提示
                     _downloadTip.value = DownloadTip(
-                        message = "正在播放已��载的 MV"
+                        message = "正在播放已载的 MV"
                     )
                     
                     // 启动播放器

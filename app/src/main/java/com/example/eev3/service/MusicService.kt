@@ -157,13 +157,19 @@ class MusicService : Service() {
             // 创建通知
             val builder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(currentPlayerData?.title ?: "易听音乐")
-                .setContentText(if (currentPlayerData != null) "点击返回播放器" else "点击打开应用")
+                .setContentText(if (currentPlayerData != null) {
+                    if (isFavorite) "已收藏 - 点击返回播放器" else "未收藏 - 点击返回播放器"
+                } else "点击打开应用")
                 .setSmallIcon(R.drawable.ic_music_note)
                 .setContentIntent(contentPendingIntent)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                // 设置媒体样式
+                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2, 3)  // 在紧凑视图中显示所有按钮
+                )
                 // 添加控制按钮
                 .addAction(R.drawable.ic_previous, "上一曲", previousPendingIntent)
                 .addAction(
