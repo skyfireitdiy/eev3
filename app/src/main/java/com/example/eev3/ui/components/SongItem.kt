@@ -86,6 +86,21 @@ fun SongItem(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.padding(top = 4.dp)
                         ) {
+                            // 零流量标记
+                            if (downloadStatus.isCached || downloadStatus.path.startsWith("/storage/")) {
+                                Text(
+                                    text = "零流量",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                    modifier = Modifier
+                                        .background(
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                            
                             // 音乐缓存和下载状态
                             if (downloadStatus.isCached) {
                                 Text(
