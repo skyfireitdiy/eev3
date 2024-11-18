@@ -121,40 +121,7 @@ class MusicService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // 创建控制按钮的 PendingIntent
-            val previousIntent = Intent(this, MusicService::class.java).apply {
-                action = ACTION_PREVIOUS
-            }
-            val previousPendingIntent = PendingIntent.getService(
-                this, 0, previousIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val playPauseIntent = Intent(this, MusicService::class.java).apply {
-                action = ACTION_PLAY_PAUSE
-            }
-            val playPausePendingIntent = PendingIntent.getService(
-                this, 0, playPauseIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val nextIntent = Intent(this, MusicService::class.java).apply {
-                action = ACTION_NEXT
-            }
-            val nextPendingIntent = PendingIntent.getService(
-                this, 0, nextIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val favoriteIntent = Intent(this, MusicService::class.java).apply {
-                action = ACTION_FAVORITE
-            }
-            val favoritePendingIntent = PendingIntent.getService(
-                this, 0, favoriteIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            // 创建通知
+            // 创建通知构建器
             val builder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(currentPlayerData?.title ?: "易听音乐")
                 .setContentText(if (currentPlayerData != null) {
@@ -166,11 +133,46 @@ class MusicService : Service() {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                // 设置媒体样式
-                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2, 3)  // 在紧凑视图中显示所有按钮
+
+            // 只有在有音乐播放时才添加控制按钮
+            if (currentPlayerData != null) {
+                // 创建控制按钮的 PendingIntent
+                val previousIntent = Intent(this, MusicService::class.java).apply {
+                    action = ACTION_PREVIOUS
+                }
+                val previousPendingIntent = PendingIntent.getService(
+                    this, 0, previousIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
-                // 添加控制按钮
+
+                val playPauseIntent = Intent(this, MusicService::class.java).apply {
+                    action = ACTION_PLAY_PAUSE
+                }
+                val playPausePendingIntent = PendingIntent.getService(
+                    this, 0, playPauseIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val nextIntent = Intent(this, MusicService::class.java).apply {
+                    action = ACTION_NEXT
+                }
+                val nextPendingIntent = PendingIntent.getService(
+                    this, 0, nextIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val favoriteIntent = Intent(this, MusicService::class.java).apply {
+                    action = ACTION_FAVORITE
+                }
+                val favoritePendingIntent = PendingIntent.getService(
+                    this, 0, favoriteIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                // 设置媒体样式和添加控制按钮
+                builder.setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                    .setShowActionsInCompactView(0, 1, 2, 3)
+                )
                 .addAction(R.drawable.ic_previous, "上一曲", previousPendingIntent)
                 .addAction(
                     if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
@@ -183,6 +185,7 @@ class MusicService : Service() {
                     if (isFavorite) "取消收藏" else "收藏",
                     favoritePendingIntent
                 )
+            }
 
             return builder.build()
         } catch (e: Exception) {
