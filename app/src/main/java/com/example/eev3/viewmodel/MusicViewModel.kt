@@ -512,7 +512,7 @@ class MusicViewModel(
         
         _currentPlayingSongState.value = song
         
-        // 如果是同一首歌，直接返回
+        // 如果是同一首��，直接返回
         if (song == currentPlayingSong && _currentPlayerData.value != null) {
             println("MusicViewModel: 相同歌曲，直接返回")
             return
@@ -530,68 +530,50 @@ class MusicViewModel(
                         .substringBefore(".html")
                     println("MusicViewModel: 歌曲ID=$songId")
                     
-                    // 检查是否已下载
+                    // 检查是否已下载或缓存
                     val sanitizedTitle = sanitizeFileName(song.title)
                     val downloadedFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "$sanitizedTitle.mp3")
+                    val cacheFile = File(context.cacheDir, "music/$songId.mp3")
                     
-                    if (downloadedFile.exists()) {
-                        println("MusicViewModel: 使用已下载的文件")
-                        // 如果已下载，直接使用下载的文件
-                        val downloadedUri = downloadedFile.toURI().toString()
-                        
-                        // 获取并缓存歌词和封面
-                        val lrcUrl = "$BASE_URL/plug/down.php?ac=music&lk=lrc&id=$songId"
-                        val lrcRequest = Request.Builder()
-                            .url(lrcUrl)
-                            .build()
-                        
-                        var lyricsUri: String? = null
-                        client.newCall(lrcRequest).execute().use { lrcResponse ->
-                            val lrcContent = lrcResponse.body?.string() ?: ""
-                            println("MusicViewModel: 开始缓存歌词")
-                            lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
-                            println("MusicViewModel: 歌词缓存完成 lyricsUri=$lyricsUri")
-                            _lyrics.value = parseLyrics(lrcContent)
-                            println("MusicViewModel: 歌词解析完成，行数=${_lyrics.value.size}")
+                    if (downloadedFile.exists() || cacheFile.exists()) {
+                        println("MusicViewModel: 使用本地文件")
+                        val audioUri = if (downloadedFile.exists()) {
+                            downloadedFile.toURI().toString()
+                        } else {
+                            cacheFile.toURI().toString()
                         }
                         
-                        // 获取封面
-                        val formBody = FormBody.Builder()
-                            .add("id", songId)
-                            .add("type", "music")
-                            .build()
+                        // 检查歌词缓存
+                        val lyricsFile = File(context.cacheDir, "lyrics/$songId.lrc")
+                        if (lyricsFile.exists()) {
+                            println("MusicViewModel: 使用缓存的歌词")
+                            val lyricsContent = lyricsFile.readText()
+                            _lyrics.value = parseLyrics(lyricsContent)
+                        }
                         
-                        val request = Request.Builder()
-                            .url("$BASE_URL/js/play.php")
-                            .post(formBody)
-                            .build()
+                        // 检查封面缓存
+                        val coverFile = File(context.cacheDir, "covers/$songId.jpg")
+                        val coverUri = if (coverFile.exists()) {
+                            println("MusicViewModel: 使用缓存的封面")
+                            coverFile.toURI().toString()
+                        } else {
+                            null
+                        }
                         
-                        client.newCall(request).execute().use { response ->
-                            val responseBody = response.body?.string()
-                            if (responseBody != null) {
-                                val playResponse = gson.fromJson(responseBody, PlayResponse::class.java)
-                                if (playResponse.msg == 1) {
-                                    println("MusicViewModel: 开始缓存封面")
-                                    val coverUri = musicCache.cacheCover(song.url, playResponse.pic)
-                                    println("MusicViewModel: 封面缓存完成 coverUri=$coverUri")
-                                    
-                                    // 更新播放器数据
-                                    _currentPlayerData.value = PlayerData(
-                                        coverImage = coverUri,
-                                        title = playResponse.title.replace("[Mp3_Lrc]", "").trim(),
-                                        audioUrl = downloadedUri
-                                    )
-                                    
-                                    // 立即启动服务
-                                    withContext(Dispatchers.Main) {
-                                        println("MusicViewModel: 更新播放数据后启动服务")
-                                        initializePlayer(context, downloadedUri)
-                                    }
-                                }
-                            }
+                        // 更新播放器数据
+                        _currentPlayerData.value = PlayerData(
+                            coverImage = coverUri ?: "",
+                            title = song.title,
+                            audioUrl = audioUri
+                        )
+                        
+                        // 立即启动服务
+                        withContext(Dispatchers.Main) {
+                            println("MusicViewModel: 更新播放数据后启动服务")
+                            initializePlayer(context, audioUri)
                         }
                     } else {
-                        // 如果未下载，走原有缓存和下载逻辑
+                        // 如果没有本地文件，尝试从网络获取
                         println("MusicViewModel: 从服务器获取数据")
                         val formBody = FormBody.Builder()
                             .add("id", songId)
@@ -610,10 +592,10 @@ class MusicViewModel(
                                 if (playResponse.msg == 1) {
                                     println("MusicViewModel: 开始缓存音乐")
                                     val audioUrl = playResponse.url
-                                    val finalUrl = musicCache.cacheMusic(song.url, audioUrl)
-                                    println("MusicViewModel: 音乐缓存完成 finalUrl=$finalUrl")
+                                    val cacheUri = musicCache.cacheMusic(song.url, audioUrl)
+                                    println("MusicViewModel: 音乐缓存完成")
                                     
-                                    // 更新缓存大小显示
+                                    // 更新缓存大小
                                     updateCacheSize()
                                     
                                     println("MusicViewModel: 开始缓存封面")
@@ -642,13 +624,13 @@ class MusicViewModel(
                                     _currentPlayerData.value = PlayerData(
                                         coverImage = coverUri,
                                         title = playResponse.title.replace("[Mp3_Lrc]", "").trim(),
-                                        audioUrl = finalUrl
+                                        audioUrl = cacheUri
                                     )
                                     
                                     // 立即启动服务
                                     withContext(Dispatchers.Main) {
                                         println("MusicViewModel: 更新播放数据后启动服务")
-                                        initializePlayer(context, finalUrl)
+                                        initializePlayer(context, cacheUri)
                                     }
                                 }
                             }
@@ -958,7 +940,7 @@ class MusicViewModel(
     fun clearCache() {
         viewModelScope.launch {
             try {
-                // ���取当前播放歌曲的URL
+                // 取当前播放歌曲的URL
                 val currentSongUrl = currentPlayingSong?.url
                 
                 if (currentSongUrl != null) {

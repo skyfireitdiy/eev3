@@ -131,13 +131,23 @@ fun MusicPlayerApp(
                                 .padding(vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = randomQuote,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "46VV",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = randomQuote,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
                         }
                         
                         // 原有的顶部栏
@@ -460,7 +470,7 @@ fun MusicPlayerApp(
                 AlertDialog(
                     onDismissRequest = { viewModel.clearPlaybackError() },
                     title = { Text("播放失败") },
-                    text = { Text("歌曲《${error.song.title}播放失败，可能链接已失效。") },
+                    text = { Text("歌��《${error.song.title}播放失败，可能链接已失效。") },
                     confirmButton = {
                         TextButton(
                             onClick = {
