@@ -49,6 +49,10 @@ fun CustomPlayer(
     val currentLyricIndex = viewModel.currentLyricIndex.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     
+    // 收集播放进度和时长
+    val currentPosition = viewModel.currentPosition.collectAsStateWithLifecycle()
+    val duration = viewModel.duration.collectAsStateWithLifecycle()
+    
     // 添加自动滚动效果
     LaunchedEffect(currentLyricIndex.value) {
         if (currentLyricIndex.value >= 0) {
@@ -115,6 +119,41 @@ fun CustomPlayer(
             }
         }
 
+        // 在播放控制之前添加进度条和时间显示
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            // 进度条
+            Slider(
+                value = currentPosition.value.toFloat(),
+                onValueChange = { viewModel.seekTo(it.toLong()) },
+                valueRange = 0f..maxOf(duration.value.toFloat(), 1f),
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            // 时间显示
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // 当前时间
+                Text(
+                    text = formatDuration(currentPosition.value),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                
+                // 总时长
+                Text(
+                    text = formatDuration(duration.value),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
+
         // 播放控制
         PlayerControls(
             isPlaying = isPlaying,
@@ -130,6 +169,14 @@ fun CustomPlayer(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+// 添加时间格式化函数
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = durationMs / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
 }
 
 @Composable

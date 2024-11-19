@@ -567,7 +567,7 @@ class MusicViewModel(
                         // 检查封面缓存
                         val coverFile = File(context.cacheDir, "covers/$songId.jpg")
                         val coverUri = if (coverFile.exists()) {
-                            println("MusicViewModel: 使用缓存的封面")
+                            println("MusicViewModel: 使用缓的封面")
                             coverFile.toURI().toString()
                         } else {
                             null
@@ -797,6 +797,7 @@ class MusicViewModel(
     
     fun seekTo(position: Long) {
         exoPlayer?.seekTo(position)
+        println("MusicViewModel: 跳转到 ${position/1000}秒")  // 直接显示秒数
     }
     
     fun setVolume(volume: Float) {
@@ -1320,7 +1321,7 @@ class MusicViewModel(
                             else -> "$BASE_URL/$songPath"
                         }
                         
-                        // 检查是否有 MV
+                        // 查是否有 MV
                         val mvElement = element.selectFirst(".mv a")
                         val hasMV = mvElement != null
                         val mvUrl = if (hasMV) {
