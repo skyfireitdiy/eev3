@@ -251,6 +251,14 @@ class MusicViewModel(
     private var hasLoadedTopRank = false
     private var hasLoadedDjDance = false
 
+    // 添加重复模式状态
+    private val _repeatMode = MutableStateFlow(ExoPlayer.REPEAT_MODE_OFF)
+    val repeatMode: StateFlow<Int> = _repeatMode
+
+    // 添加音量状态
+    private val _volume = MutableStateFlow(1f)  // 默认音量为1（最大）
+    val volume: StateFlow<Float> = _volume
+
     init {
         // 加载保存的收藏
         viewModelScope.launch {
@@ -715,7 +723,14 @@ class MusicViewModel(
                     // 播放状态改变时更新通知栏
                     updateNotification()
                 }
+
+                override fun onRepeatModeChanged(repeatMode: Int) {
+                    _repeatMode.value = repeatMode
+                }
             })
+            
+            // 设置初始音量
+            volume = _volume.value
         }
         
         // 启动进度更新
@@ -785,7 +800,12 @@ class MusicViewModel(
     }
     
     fun setVolume(volume: Float) {
-        exoPlayer?.volume = volume
+        exoPlayer?.let { player ->
+            val clampedVolume = volume.coerceIn(0f, 1f)  // 确保音量在0-1之间
+            player.volume = clampedVolume
+            _volume.value = clampedVolume
+            println("MusicViewModel: 设置音量为: $clampedVolume")
+        }
     }
     
     fun getVolume(): Float = exoPlayer?.volume ?: 1f
@@ -1524,7 +1544,7 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
-                println("MusicViewModel: 开始下载 MV ${song.title}")
+                println("MusicViewModel: 始下载 MV ${song.title}")
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 // 显示开始下载提示
@@ -1632,6 +1652,27 @@ class MusicViewModel(
         } catch (e: Exception) {
             println("MusicViewModel: 更新通知失败: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    // 切换重复模式
+    fun toggleRepeatMode() {
+        exoPlayer?.let { player ->
+            val newMode = when (player.repeatMode) {
+                ExoPlayer.REPEAT_MODE_OFF -> ExoPlayer.REPEAT_MODE_ONE
+                ExoPlayer.REPEAT_MODE_ONE -> ExoPlayer.REPEAT_MODE_ALL
+                else -> ExoPlayer.REPEAT_MODE_OFF
+            }
+            player.repeatMode = newMode
+            _repeatMode.value = newMode
+            println("MusicViewModel: 切换重复模式为: ${
+                when (newMode) {
+                    ExoPlayer.REPEAT_MODE_OFF -> "不重复"
+                    ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
+                    ExoPlayer.REPEAT_MODE_ALL -> "列表循环"
+                    else -> "未知"
+                }
+            }")
         }
     }
 }

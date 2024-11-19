@@ -22,109 +22,82 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import com.example.eev3.ui.theme.ChineseRed
 
 @Composable
 fun CustomPlayer(
     playerData: PlayerData,
     viewModel: MusicViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isFavorite: Boolean,
+    onFavoriteClick: () -> Unit,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onRepeatMode: () -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    repeatMode: Int,
+    volume: Float
 ) {
-    var isLyricsFullscreen by remember { mutableStateOf(false) }
-    val lyrics by viewModel.lyrics.collectAsStateWithLifecycle()
-    val currentLyricIndex by viewModel.currentLyricIndex.collectAsStateWithLifecycle()
+    val lyrics = viewModel.lyrics.collectAsStateWithLifecycle()
+    val currentLyricIndex = viewModel.currentLyricIndex.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     
-    // 自动滚动到当前歌词
-    LaunchedEffect(currentLyricIndex) {
-        if (currentLyricIndex >= 0) {
+    // 添加自动滚动效果
+    LaunchedEffect(currentLyricIndex.value) {
+        if (currentLyricIndex.value >= 0) {
             listState.animateScrollToItem(
-                index = currentLyricIndex.coerceAtMost(lyrics.size - 1),
+                index = maxOf(0, currentLyricIndex.value - 2),
                 scrollOffset = -100
             )
         }
     }
-    
+
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (!isLyricsFullscreen) {
-            // 正常模式显示所有内容
-            // 封面图片
-            AsyncImage(
-                model = playerData.coverImage,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(200.dp)
-                    .padding(bottom = 16.dp)
-            )
-            
-            // 标题
-            Text(
-                text = playerData.title,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-            
-            // 音频播放器
-            AudioPlayer(
-                viewModel = viewModel,
-                audioUrl = playerData.audioUrl,
-                modifier = Modifier.fillMaxWidth()
-            )
-            
-            // 添加歌词提示文字
-            Text(
-                text = "双击歌词切换大歌词模式",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-            )
-        } else {
-            // 在全屏模式下显示提示文字
-            Text(
-                text = "双击歌词切换封面模式",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-        }
-        
+        // 封面图片
+        AsyncImage(
+            model = playerData.coverImage,
+            contentDescription = "封面",
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .padding(32.dp)
+        )
+
+        // 标题
+        Text(
+            text = playerData.title,
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(16.dp)
+        )
+
         // 歌词列表
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(top = if (isLyricsFullscreen) 0.dp else 16.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            isLyricsFullscreen = !isLyricsFullscreen
-                        }
-                    )
-                },
+                .padding(top = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = if (isLyricsFullscreen) Arrangement.Center else Arrangement.Top
+            verticalArrangement = Arrangement.Top
         ) {
-            items(lyrics) { lyric ->
-                val isCurrentLyric = lyrics.indexOf(lyric) == currentLyricIndex
+            items(lyrics.value) { lyric ->
+                val isCurrentLyric = lyrics.value.indexOf(lyric) == currentLyricIndex.value
                 Text(
                     text = lyric.text,
                     style = if (isCurrentLyric) {
-                        if (isLyricsFullscreen) {
-                            MaterialTheme.typography.headlineMedium  // 全屏模式使用更大字体
-                        } else {
-                            MaterialTheme.typography.titleMedium
-                        }
+                        MaterialTheme.typography.titleMedium
                     } else {
-                        if (isLyricsFullscreen) {
-                            MaterialTheme.typography.titleMedium  // 全屏模式使用更大字体
-                        } else {
-                            MaterialTheme.typography.bodyMedium
-                        }
+                        MaterialTheme.typography.bodyMedium
                     },
                     color = if (isCurrentLyric) {
                         MaterialTheme.colorScheme.primary
@@ -134,34 +107,28 @@ fun CustomPlayer(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
-                            vertical = if (isCurrentLyric) {
-                                if (isLyricsFullscreen) 24.dp else 12.dp
-                            } else {
-                                if (isLyricsFullscreen) 16.dp else 8.dp
-                            },
-                            horizontal = 16.dp  // 添加水平内边距
+                            vertical = if (isCurrentLyric) 12.dp else 8.dp,
+                            horizontal = 16.dp
                         ),
-                    fontWeight = if (isCurrentLyric) {
-                        FontWeight.Bold
-                    } else {
-                        FontWeight.Normal
-                    },
-                    textAlign = TextAlign.Center,  // 设置文本居中对齐
-                    lineHeight = if (isLyricsFullscreen) 32.sp else 24.sp  // 设置行高
+                    textAlign = TextAlign.Center
                 )
             }
         }
-        
-        // 在全屏模式下显示迷你播放控制
-        if (isLyricsFullscreen) {
-            AudioPlayer(
-                viewModel = viewModel,
-                audioUrl = playerData.audioUrl,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-            )
-        }
+
+        // 播放控制
+        PlayerControls(
+            isPlaying = isPlaying,
+            onPlayPause = onPlayPause,
+            onPrevious = onPrevious,
+            onNext = onNext,
+            onRepeatMode = onRepeatMode,
+            onVolumeChange = onVolumeChange,
+            onFavoriteClick = onFavoriteClick,
+            repeatMode = repeatMode,
+            volume = volume,
+            isFavorite = isFavorite,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -193,6 +160,108 @@ fun LyricsDisplay(
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun PlayerControls(
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onRepeatMode: () -> Unit,
+    onVolumeChange: (Float) -> Unit,
+    onFavoriteClick: () -> Unit,  // 添加收藏回调
+    repeatMode: Int,
+    volume: Float,
+    isFavorite: Boolean,  // 添加收藏状态
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // 播放控制按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onPrevious) {
+                Icon(
+                    imageVector = Icons.Default.SkipPrevious,
+                    contentDescription = "上一曲"
+                )
+            }
+            
+            IconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(64.dp)
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.PauseCircle else Icons.Default.PlayCircle,
+                    contentDescription = if (isPlaying) "暂停" else "播放",
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            
+            IconButton(onClick = onNext) {
+                Icon(
+                    imageVector = Icons.Default.SkipNext,
+                    contentDescription = "下一曲"
+                )
+            }
+        }
+        
+        // 功能按钮行
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 收藏按钮
+            IconButton(onClick = onFavoriteClick) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = if (isFavorite) "取消收藏" else "收藏",
+                    tint = if (isFavorite) ChineseRed else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            // 循环模式按钮
+            IconButton(onClick = onRepeatMode) {
+                Icon(
+                    imageVector = when (repeatMode) {
+                        ExoPlayer.REPEAT_MODE_OFF -> Icons.Default.RepeatOne
+                        ExoPlayer.REPEAT_MODE_ONE -> Icons.Default.Repeat
+                        else -> Icons.Default.RepeatOn
+                    },
+                    contentDescription = "循环模式"
+                )
+            }
+            
+            // 音量控制
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.VolumeDown,
+                    contentDescription = "音量"
+                )
+                Slider(
+                    value = volume,
+                    onValueChange = onVolumeChange,
+                    modifier = Modifier.width(100.dp)
+                )
+                Icon(
+                    imageVector = Icons.Default.VolumeUp,
+                    contentDescription = "音量"
+                )
+            }
         }
     }
 } 

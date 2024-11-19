@@ -115,9 +115,23 @@ fun MusicPlayerApp(
                 CustomPlayer(
                     playerData = currentPlayerData!!,
                     viewModel = viewModel,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.statusBars)  // 添加状态栏padding
+                    modifier = Modifier.fillMaxSize(),
+                    isFavorite = currentSong?.let { song ->
+                        viewModel.favorites.collectAsStateWithLifecycle().value.any { it.song.url == song.url }
+                    } ?: false,
+                    onFavoriteClick = {
+                        currentSong?.let { song ->
+                            viewModel.toggleFavorite(ObservableSong(song))
+                        }
+                    },
+                    isPlaying = viewModel.isPlaying.collectAsStateWithLifecycle().value,
+                    onPlayPause = { viewModel.playPause() },
+                    onPrevious = { viewModel.playPrevious() },
+                    onNext = { viewModel.playNext() },
+                    onRepeatMode = { viewModel.toggleRepeatMode() },
+                    onVolumeChange = { viewModel.setVolume(it) },
+                    repeatMode = viewModel.repeatMode.collectAsStateWithLifecycle().value,
+                    volume = viewModel.volume.collectAsStateWithLifecycle().value
                 )
             }
         } else {
