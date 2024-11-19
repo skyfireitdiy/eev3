@@ -37,6 +37,10 @@ import com.example.eev3.data.ObservableSong
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import com.example.eev3.data.Quotes
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.ExperimentalMaterialApi
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -389,6 +393,7 @@ fun MusicPlayerApp(
                                     loadingMore = viewModel.newRankLoadingMore.collectAsStateWithLifecycle().value,
                                     reachedEnd = viewModel.newRankReachedEnd.collectAsStateWithLifecycle().value,
                                     onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.NEW) },
+                                    onRefresh = { viewModel.loadRankSongs(MusicViewModel.RankType.NEW, 1, true) },
                                     onSongClick = { song ->
                                         lastPageBeforePlayer = currentPage
                                         currentSong = song.song
@@ -410,6 +415,7 @@ fun MusicPlayerApp(
                                     loadingMore = viewModel.topRankLoadingMore.collectAsStateWithLifecycle().value,
                                     reachedEnd = viewModel.topRankReachedEnd.collectAsStateWithLifecycle().value,
                                     onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.TOP) },
+                                    onRefresh = { viewModel.loadRankSongs(MusicViewModel.RankType.TOP, 1, true) },
                                     onSongClick = { song ->
                                         lastPageBeforePlayer = currentPage
                                         currentSong = song.song
@@ -431,6 +437,7 @@ fun MusicPlayerApp(
                                     loadingMore = viewModel.djDanceLoadingMore.collectAsStateWithLifecycle().value,
                                     reachedEnd = viewModel.djDanceReachedEnd.collectAsStateWithLifecycle().value,
                                     onLoadMore = { viewModel.loadMoreRank(MusicViewModel.RankType.DJ_DANCE) },
+                                    onRefresh = { viewModel.loadRankSongs(MusicViewModel.RankType.DJ_DANCE, 1, true) },
                                     onSongClick = { song ->
                                         lastPageBeforePlayer = currentPage
                                         currentSong = song.song
@@ -470,7 +477,7 @@ fun MusicPlayerApp(
                 AlertDialog(
                     onDismissRequest = { viewModel.clearPlaybackError() },
                     title = { Text("播放失败") },
-                    text = { Text("歌��《${error.song.title}播放失败，可能链接已失效。") },
+                    text = { Text("歌《${error.song.title}播放失败，可能链接已失效。") },
                     confirmButton = {
                         TextButton(
                             onClick = {
@@ -555,65 +562,89 @@ fun MusicPlayerApp(
 }
 
 // 添加榜单页面组件
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun RankListPage(
     songs: List<ObservableSong>,
     loadingMore: Boolean,
     reachedEnd: Boolean,
     onLoadMore: () -> Unit,
+    onRefresh: () -> Unit,
     onSongClick: (ObservableSong) -> Unit,
     onFavoriteClick: (ObservableSong) -> Unit,
     onDownloadClick: (ObservableSong) -> Unit,
     viewModel: MusicViewModel
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(0.dp),
-        verticalArrangement = Arrangement.Top,
-        userScrollEnabled = true
-    ) {
-        items(songs) { song ->
-            SongItem(
-                song = song,
-                onSongClick = { onSongClick(song) },
-                onFavoriteClick = { onFavoriteClick(song) },
-                onDownloadClick = { onDownloadClick(song) },
-                onPlayMVClick = { viewModel.playMV(song.song) },
-                onDownloadMVClick = { viewModel.downloadMV(song.song) },
-                downloadStatus = viewModel.checkSongStatus(song.song),
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            isRefreshing = true
+            onRefresh()
+            isRefreshing = false
         }
-        
-        item {
-            if (songs.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (loadingMore) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = ChineseRed
-                        )
-                    } else if (reachedEnd) {
-                        Text(
-                            text = "已经到底了",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                    } else {
-                        TextButton(
-                            onClick = onLoadMore
-                        ) {
-                            Text("加载更多")
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pullRefresh(pullRefreshState)
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(0.dp),
+            verticalArrangement = Arrangement.Top,
+            userScrollEnabled = true
+        ) {
+            items(songs) { song ->
+                SongItem(
+                    song = song,
+                    onSongClick = { onSongClick(song) },
+                    onFavoriteClick = { onFavoriteClick(song) },
+                    onDownloadClick = { onDownloadClick(song) },
+                    onPlayMVClick = { viewModel.playMV(song.song) },
+                    onDownloadMVClick = { viewModel.downloadMV(song.song) },
+                    downloadStatus = viewModel.checkSongStatus(song.song),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+            
+            item {
+                if (songs.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (loadingMore) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = ChineseRed
+                            )
+                        } else if (reachedEnd) {
+                            Text(
+                                text = "已经到底了",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                        } else {
+                            TextButton(
+                                onClick = onLoadMore
+                            ) {
+                                Text("加载更多")
+                            }
                         }
                     }
                 }
             }
         }
+
+        PullRefreshIndicator(
+            refreshing = isRefreshing,
+            state = pullRefreshState,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 

@@ -1132,9 +1132,10 @@ class MusicViewModel(
     }
 
     // 修改加载榜单数据的方法
-    fun loadRankSongs(type: RankType, page: Int = 1) {
-        // 如果已经加载过且是第一页，直接返回
-        if (page == 1) {
+    fun loadRankSongs(type: RankType, page: Int = 1, isRefresh: Boolean = false) {
+        // 如果是刷新，忽略已加载状态
+        // 如果不是刷新且已加载过，则跳过
+        if (!isRefresh && page == 1) {
             when (type) {
                 RankType.NEW -> {
                     if (hasLoadedNewRank && _newRankSongs.value.isNotEmpty()) {
@@ -1177,7 +1178,12 @@ class MusicViewModel(
                     currentPage = newRankCurrentPage,
                     setCurrentPage = { newRankCurrentPage = it },
                     setLoading = { isNewRankLoading = it },
-                    onSuccess = { hasLoadedNewRank = true }  // 标记加载成功
+                    onSuccess = { 
+                        hasLoadedNewRank = true
+                        if (isRefresh) {
+                            _downloadTip.value = DownloadTip(message = "新歌榜刷新成功")
+                        }
+                    }
                 )
             }
             RankType.TOP -> {
@@ -1198,7 +1204,12 @@ class MusicViewModel(
                     currentPage = topRankCurrentPage,
                     setCurrentPage = { topRankCurrentPage = it },
                     setLoading = { isTopRankLoading = it },
-                    onSuccess = { hasLoadedTopRank = true }  // 标记加载成功
+                    onSuccess = { 
+                        hasLoadedTopRank = true
+                        if (isRefresh) {
+                            _downloadTip.value = DownloadTip(message = "TOP榜刷新成功")
+                        }
+                    }
                 )
             }
             RankType.DJ_DANCE -> {
@@ -1219,7 +1230,12 @@ class MusicViewModel(
                     currentPage = djDanceCurrentPage,
                     setCurrentPage = { djDanceCurrentPage = it },
                     setLoading = { isDjDanceLoading = it },
-                    onSuccess = { hasLoadedDjDance = true }  // 标记加载成功
+                    onSuccess = { 
+                        hasLoadedDjDance = true
+                        if (isRefresh) {
+                            _downloadTip.value = DownloadTip(message = "DJ舞曲刷新成功")
+                        }
+                    }
                 )
             }
         }
