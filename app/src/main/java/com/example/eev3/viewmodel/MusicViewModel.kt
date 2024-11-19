@@ -246,6 +246,11 @@ class MusicViewModel(
     // 添加广播接收器变量
     private var controlReceiver: BroadcastReceiver? = null
 
+    // 添加加载状态记录
+    private var hasLoadedNewRank = false
+    private var hasLoadedTopRank = false
+    private var hasLoadedDjDance = false
+
     init {
         // 加载保存的收藏
         viewModelScope.launch {
@@ -512,7 +517,7 @@ class MusicViewModel(
         
         _currentPlayingSongState.value = song
         
-        // 如果是同一首��，直接返回
+        // 如果是同一首，直接返回
         if (song == currentPlayingSong && _currentPlayerData.value != null) {
             println("MusicViewModel: 相同歌曲，直接返回")
             return
@@ -1128,6 +1133,30 @@ class MusicViewModel(
 
     // 修改加载榜单数据的方法
     fun loadRankSongs(type: RankType, page: Int = 1) {
+        // 如果已经加载过且是第一页，直接返回
+        if (page == 1) {
+            when (type) {
+                RankType.NEW -> {
+                    if (hasLoadedNewRank && _newRankSongs.value.isNotEmpty()) {
+                        println("MusicViewModel: 新歌榜已加载，跳过")
+                        return
+                    }
+                }
+                RankType.TOP -> {
+                    if (hasLoadedTopRank && _topRankSongs.value.isNotEmpty()) {
+                        println("MusicViewModel: TOP榜已加载，跳过")
+                        return
+                    }
+                }
+                RankType.DJ_DANCE -> {
+                    if (hasLoadedDjDance && _djDanceSongs.value.isNotEmpty()) {
+                        println("MusicViewModel: DJ舞曲已加载，跳过")
+                        return
+                    }
+                }
+            }
+        }
+
         // 根据类型选择对应的状态
         when (type) {
             RankType.NEW -> {
@@ -1147,7 +1176,8 @@ class MusicViewModel(
                     reachedEnd = _newRankReachedEnd,
                     currentPage = newRankCurrentPage,
                     setCurrentPage = { newRankCurrentPage = it },
-                    setLoading = { isNewRankLoading = it }
+                    setLoading = { isNewRankLoading = it },
+                    onSuccess = { hasLoadedNewRank = true }  // 标记加载成功
                 )
             }
             RankType.TOP -> {
@@ -1167,7 +1197,8 @@ class MusicViewModel(
                     reachedEnd = _topRankReachedEnd,
                     currentPage = topRankCurrentPage,
                     setCurrentPage = { topRankCurrentPage = it },
-                    setLoading = { isTopRankLoading = it }
+                    setLoading = { isTopRankLoading = it },
+                    onSuccess = { hasLoadedTopRank = true }  // 标记加载成功
                 )
             }
             RankType.DJ_DANCE -> {
@@ -1187,13 +1218,14 @@ class MusicViewModel(
                     reachedEnd = _djDanceReachedEnd,
                     currentPage = djDanceCurrentPage,
                     setCurrentPage = { djDanceCurrentPage = it },
-                    setLoading = { isDjDanceLoading = it }
+                    setLoading = { isDjDanceLoading = it },
+                    onSuccess = { hasLoadedDjDance = true }  // 标记加载成功
                 )
             }
         }
     }
 
-    // 修改内部加载方法
+    // 修改内部加载方法，添加成功回调
     private fun loadRankSongsInternal(
         type: RankType,
         page: Int,
@@ -1202,7 +1234,8 @@ class MusicViewModel(
         reachedEnd: MutableStateFlow<Boolean>,
         currentPage: Int,
         setCurrentPage: (Int) -> Unit,
-        setLoading: (Boolean) -> Unit
+        setLoading: (Boolean) -> Unit,
+        onSuccess: () -> Unit  // 添加成功回调
     ) {
         viewModelScope.launch {
             try {
@@ -1287,6 +1320,10 @@ class MusicViewModel(
                     // 更新页码
                     setCurrentPage(page)
                 }
+                
+                // 加载成功后调用回调
+                onSuccess()
+                
             } catch (e: Exception) {
                 e.printStackTrace()
                 _searchError.value = when {
