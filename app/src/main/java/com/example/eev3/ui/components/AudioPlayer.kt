@@ -30,7 +30,7 @@ fun AudioPlayer(
     
     // 初始化播放器
     LaunchedEffect(audioUrl) {
-        viewModel.initializePlayer(context, audioUrl)
+        viewModel.initializePlayer(audioUrl)
     }
     
     Column(

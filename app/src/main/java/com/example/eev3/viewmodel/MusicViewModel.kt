@@ -251,13 +251,17 @@ class MusicViewModel(
     private var hasLoadedTopRank = false
     private var hasLoadedDjDance = false
 
-    // 添加重复模式状态
-    private val _repeatMode = MutableStateFlow(ExoPlayer.REPEAT_MODE_OFF)
+    // 修改重复模式状态的初始值为列表循环
+    private val _repeatMode = MutableStateFlow(ExoPlayer.REPEAT_MODE_ALL)
     val repeatMode: StateFlow<Int> = _repeatMode
 
     // 添加音量状态
     private val _volume = MutableStateFlow(1f)  // 默认音量为1（最大）
     val volume: StateFlow<Float> = _volume
+
+    // 添加获取随机播放状态的方法
+    private val _shuffleEnabled = MutableStateFlow(false)
+    val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled
 
     init {
         // 加载保存的收藏
@@ -517,7 +521,7 @@ class MusicViewModel(
     fun loadPlayerData(song: Song, source: PlaylistSource) {
         println("MusicViewModel: 开始播放 ${song.title}")
         
-        // 更新播放列表来源和索引
+        // 更新播放列来源和索引
         currentPlaylistSource = source
         val playlist = currentPlaylist
         currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
@@ -583,11 +587,11 @@ class MusicViewModel(
                         // 立即启动服务
                         withContext(Dispatchers.Main) {
                             println("MusicViewModel: 更新播放数据后启动服务")
-                            initializePlayer(context, audioUri)
+                            setupPlayer(audioUri)
                         }
                     } else {
                         // 如果没有本地文件，尝试从网络获取
-                        println("MusicViewModel: 从服务器获取数据")
+                        println("MusicViewModel: 从服器获取数据")
                         val formBody = FormBody.Builder()
                             .add("id", songId)
                             .add("type", "music")
@@ -643,7 +647,7 @@ class MusicViewModel(
                                     // 立即启动服务
                                     withContext(Dispatchers.Main) {
                                         println("MusicViewModel: 更新播放数据后启动服务")
-                                        initializePlayer(context, cacheUri)
+                                        setupPlayer(audioUrl)
                                     }
                                 }
                             }
@@ -684,28 +688,32 @@ class MusicViewModel(
         }
     }
     
-    fun initializePlayer(context: Context, audioUrl: String) {
+    private fun setupPlayer(audioUrl: String) {
         println("MusicViewModel: 初始化播放器 audioUrl=$audioUrl")
         
         // 如是同一个URL只需要更新UI状态
         if (audioUrl == currentAudioUrl && exoPlayer != null) {
             println("MusicViewModel: 相同URL，只更新UI状态")
-            // 更新进度和时长
-            exoPlayer?.let { player ->
-                _currentPosition.value = player.currentPosition
-                _duration.value = player.duration
-                _isPlaying.value = player.isPlaying
-            }
             return
         }
         
         currentAudioUrl = audioUrl
+        
+        // 保存当前的播放模式
+        val savedRepeatMode = exoPlayer?.repeatMode ?: ExoPlayer.REPEAT_MODE_ALL
+        val savedShuffleEnabled = exoPlayer?.shuffleModeEnabled ?: false
         
         // 初始化播放器
         exoPlayer?.release()
         exoPlayer = ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(audioUrl))
             prepare()
+            
+            // 恢复播放模式
+            repeatMode = savedRepeatMode
+            shuffleModeEnabled = savedShuffleEnabled
+            _repeatMode.value = savedRepeatMode
+            _shuffleEnabled.value = savedShuffleEnabled
             
             addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
@@ -714,7 +722,27 @@ class MusicViewModel(
                         play()  // 准备就绪后开始播放
                         _isPlaying.value = true  // 更新播放状态
                     } else if (state == Player.STATE_ENDED) {
-                        handlePlaybackEnd()
+                        // 播放结束时的处理
+                        when (repeatMode) {
+                            ExoPlayer.REPEAT_MODE_OFF -> {
+                                // 单次播放模式，停止播放
+                                pause()
+                                _isPlaying.value = false
+                                seekTo(0)  // 回到开始位置
+                                println("MusicViewModel: 单次播放模式，播放结束")
+                            }
+                            ExoPlayer.REPEAT_MODE_ONE -> {
+                                // 单曲循环模式，自动重新播放
+                                seekTo(0)
+                                play()
+                                println("MusicViewModel: 单曲循环模式，重新播放")
+                            }
+                            ExoPlayer.REPEAT_MODE_ALL -> {
+                                // 列表循环或随机播放模式，播放下一曲
+                                playNext()
+                                println("MusicViewModel: 列表循环/随机播放模式，播放下一曲")
+                            }
+                        }
                     }
                 }
                 
@@ -726,6 +754,12 @@ class MusicViewModel(
 
                 override fun onRepeatModeChanged(repeatMode: Int) {
                     _repeatMode.value = repeatMode
+                    println("MusicViewModel: 重复模式改变为: $repeatMode")
+                }
+
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    _shuffleEnabled.value = shuffleModeEnabled
+                    println("MusicViewModel: 随机播放模式改变为: $shuffleModeEnabled")
                 }
             })
             
@@ -853,62 +887,230 @@ class MusicViewModel(
         exoPlayer?.shuffleModeEnabled = (_playMode.value == PlayMode.RANDOM)
     }
 
+    // 修改播放下一曲的方法
     fun playNext() {
-        val playlist = currentPlaylist
-        if (playlist.isEmpty()) return
+        println("MusicViewModel: 播放下一曲")
         
-        when (_playMode.value) {
-            PlayMode.SEQUENCE -> {
-                // 顺序播放，播放下一首
-                val nextIndex = (currentPlayingIndex + 1) % playlist.size
-                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
+        // 如果是单次播放模式且已经是最后一首，则不播放
+        if (exoPlayer?.repeatMode == ExoPlayer.REPEAT_MODE_OFF) {
+            when (currentPlaylistSource) {
+                PlaylistSource.FAVORITES -> {
+                    val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == _favorites.value.size - 1) {
+                        println("MusicViewModel: 单次播放模式，已是最后一首")
+                        return
+                    }
+                }
+                PlaylistSource.SEARCH -> {
+                    val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == _searchResults.value.size - 1) {
+                        println("MusicViewModel: 单次播放模式，已是最后一首")
+                        return
+                    }
+                }
+                PlaylistSource.NEW_RANK -> {
+                    val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == _newRankSongs.value.size - 1) {
+                        println("MusicViewModel: 单次播放模式，已是最后一首")
+                        return
+                    }
+                }
+                PlaylistSource.TOP_RANK -> {
+                    val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == _topRankSongs.value.size - 1) {
+                        println("MusicViewModel: 单次播放模式，已是最后一首")
+                        return
+                    }
+                }
+                PlaylistSource.DJ_DANCE -> {
+                    val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == _djDanceSongs.value.size - 1) {
+                        println("MusicViewModel: 单次播放模式，已是最后一首")
+                        return
+                    }
+                }
             }
-            PlayMode.SINGLE_LOOP -> {
-                // 单曲循环，重新播放当前歌曲
-                currentPlayingSong?.let { loadPlayerData(it, currentPlaylistSource) }
+        }
+        
+        when (currentPlaylistSource) {
+            PlaylistSource.FAVORITES -> {
+                val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _favorites.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex + 1) % _favorites.value.size
+                    }
+                    loadPlayerData(_favorites.value[nextIndex].song, PlaylistSource.FAVORITES)
+                }
             }
-            PlayMode.RANDOM -> {
-                // 随机播放，随机选择一首
-                val nextIndex = (0 until playlist.size).random()
-                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
+            PlaylistSource.SEARCH -> {
+                val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _searchResults.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex + 1) % _searchResults.value.size
+                    }
+                    loadPlayerData(_searchResults.value[nextIndex].song, PlaylistSource.SEARCH)
+                }
             }
-            PlayMode.ONCE -> {
-                // 单次播放，不做任何操作
+            PlaylistSource.NEW_RANK -> {
+                val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _newRankSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex + 1) % _newRankSongs.value.size
+                    }
+                    loadPlayerData(_newRankSongs.value[nextIndex].song, PlaylistSource.NEW_RANK)
+                }
+            }
+            PlaylistSource.TOP_RANK -> {
+                val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _topRankSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex + 1) % _topRankSongs.value.size
+                    }
+                    loadPlayerData(_topRankSongs.value[nextIndex].song, PlaylistSource.TOP_RANK)
+                }
+            }
+            PlaylistSource.DJ_DANCE -> {
+                val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _djDanceSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex + 1) % _djDanceSongs.value.size
+                    }
+                    loadPlayerData(_djDanceSongs.value[nextIndex].song, PlaylistSource.DJ_DANCE)
+                }
             }
         }
     }
 
+    // 修改播放上一曲的方法
     fun playPrevious() {
-        val playlist = currentPlaylist
-        if (playlist.isEmpty()) return
+        println("MusicViewModel: 播放上一曲")
         
-        when (_playMode.value) {
-            PlayMode.SEQUENCE -> {
-                // 顺序放，播放上一首
-                val previousIndex = if (currentPlayingIndex > 0) {
-                    currentPlayingIndex - 1
-                } else {
-                    playlist.size - 1
+        // 如果是单次播放模式且已经是第一首，则不播放
+        if (exoPlayer?.repeatMode == ExoPlayer.REPEAT_MODE_OFF) {
+            when (currentPlaylistSource) {
+                PlaylistSource.FAVORITES -> {
+                    val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == 0) {
+                        println("MusicViewModel: 单次播放模式，已是第一首")
+                        return
+                    }
                 }
-                loadPlayerData(playlist[previousIndex], currentPlaylistSource)
-            }
-            PlayMode.SINGLE_LOOP -> {
-                // 单曲循环，重新播放当前歌曲
-                currentPlayingSong?.let { loadPlayerData(it, currentPlaylistSource) }
-            }
-            PlayMode.RANDOM -> {
-                // 随机播放，随机选择一首
-                val nextIndex = (0 until playlist.size).random()
-                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
-            }
-            PlayMode.ONCE -> {
-                // 单次播放模式下也允许切换到上一首
-                val previousIndex = if (currentPlayingIndex > 0) {
-                    currentPlayingIndex - 1
-                } else {
-                    playlist.size - 1
+                PlaylistSource.SEARCH -> {
+                    val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == 0) {
+                        println("MusicViewModel: 单次播放模式，已是第一首")
+                        return
+                    }
                 }
-                loadPlayerData(playlist[previousIndex], currentPlaylistSource)
+                PlaylistSource.NEW_RANK -> {
+                    val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == 0) {
+                        println("MusicViewModel: 单次播放模式，已是第一首")
+                        return
+                    }
+                }
+                PlaylistSource.TOP_RANK -> {
+                    val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == 0) {
+                        println("MusicViewModel: 单次播放式，已是第一首")
+                        return
+                    }
+                }
+                PlaylistSource.DJ_DANCE -> {
+                    val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                    if (currentIndex == 0) {
+                        println("MusicViewModel: 单次播放模式，已是第一首")
+                        return
+                    }
+                }
+            }
+        }
+        
+        when (currentPlaylistSource) {
+            PlaylistSource.FAVORITES -> {
+                val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val prevIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _favorites.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex - 1 + _favorites.value.size) % _favorites.value.size
+                    }
+                    loadPlayerData(_favorites.value[prevIndex].song, PlaylistSource.FAVORITES)
+                }
+            }
+            PlaylistSource.SEARCH -> {
+                val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val prevIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _searchResults.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex - 1 + _searchResults.value.size) % _searchResults.value.size
+                    }
+                    loadPlayerData(_searchResults.value[prevIndex].song, PlaylistSource.SEARCH)
+                }
+            }
+            PlaylistSource.NEW_RANK -> {
+                val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val prevIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随播放模式
+                        (0 until _newRankSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex - 1 + _newRankSongs.value.size) % _newRankSongs.value.size
+                    }
+                    loadPlayerData(_newRankSongs.value[prevIndex].song, PlaylistSource.NEW_RANK)
+                }
+            }
+            PlaylistSource.TOP_RANK -> {
+                val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val prevIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _topRankSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex - 1 + _topRankSongs.value.size) % _topRankSongs.value.size
+                    }
+                    loadPlayerData(_topRankSongs.value[prevIndex].song, PlaylistSource.TOP_RANK)
+                }
+            }
+            PlaylistSource.DJ_DANCE -> {
+                val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                if (currentIndex != -1) {
+                    val prevIndex = if (exoPlayer?.shuffleModeEnabled == true) {
+                        // 随机播放模式
+                        (0 until _djDanceSongs.value.size).random()
+                    } else {
+                        // 列表循环或单次播放模式
+                        (currentIndex - 1 + _djDanceSongs.value.size) % _djDanceSongs.value.size
+                    }
+                    loadPlayerData(_djDanceSongs.value[prevIndex].song, PlaylistSource.DJ_DANCE)
+                }
             }
         }
     }
@@ -973,7 +1175,7 @@ class MusicViewModel(
                     println("MusicViewModel: 清除缓存时保护当前播放歌曲: ${currentPlayingSong?.title}")
                 }
                 
-                // 清除缓存时跳过当前播放的音乐
+                // 清除缓存时跳过前播放的音乐
                 musicCache.clearCache(skipUrls = listOfNotNull(currentSongUrl))
                 
                 // 清除缓存后立即更新缓存大小显示
@@ -1095,7 +1297,7 @@ class MusicViewModel(
                         }
                         
                         _downloadTip.value = DownloadTip(
-                            message = "下载成",
+                            message = "下载完成",
                             path = targetFile.absolutePath
                         )
                     } else {
@@ -1334,7 +1536,7 @@ class MusicViewModel(
                         } else ""
                         
                         if (title.isNotEmpty() && songUrl.isNotEmpty()) {
-                            // 检查是否已收藏
+                            // 查是否已收藏
                             val isFavorite = _favorites.value.any { it.song.url == songUrl }
                             ObservableSong(Song(title, songUrl, isFavorite = isFavorite, hasMV = hasMV, mvUrl = mvUrl))
                         } else null
@@ -1458,7 +1660,7 @@ class MusicViewModel(
                 val songId = song.url.substringAfterLast("/").substringBefore(".html")
                 val sanitizedTitle = sanitizeFileName(song.title)
                 
-                // 检查是否已下载
+                // 检查是否已下
                 val downloadedFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "$sanitizedTitle.mp4")
                 if (downloadedFile.exists()) {
                     println("MusicViewModel: 使用已下载的 MV")
@@ -1567,7 +1769,7 @@ class MusicViewModel(
                     // 检查是否已缓存
                     val cacheFile = File(context.cacheDir, "mv/$songId.mp4")
                     if (cacheFile.exists()) {
-                        println("MusicViewModel: 使用缓存的 MV")
+                        println("MusicViewModel: 使用缓的 MV")
                         // 复制到下载目录
                         println("MusicViewModel: 复制到下载目录")
                         cacheFile.copyTo(targetFile, overwrite = true)
@@ -1591,8 +1793,8 @@ class MusicViewModel(
                     
                     // 确保文件已经复制成功
                     if (targetFile.exists() && targetFile.length() > 0) {
-                        println("MusicViewModel: MV 下载完成 path=${targetFile.absolutePath}")
-                        // 通知系统媒体库更新
+                        println("MusicViewModel: MV 下载成 path=${targetFile.absolutePath}")
+                        // 通知系���媒体库更新
                         MediaScannerConnection.scanFile(
                             context,
                             arrayOf(targetFile.absolutePath),
@@ -1659,21 +1861,49 @@ class MusicViewModel(
     // 切换重复模式
     fun toggleRepeatMode() {
         exoPlayer?.let { player ->
-            val newMode = when (player.repeatMode) {
-                ExoPlayer.REPEAT_MODE_OFF -> ExoPlayer.REPEAT_MODE_ONE
-                ExoPlayer.REPEAT_MODE_ONE -> ExoPlayer.REPEAT_MODE_ALL
-                else -> ExoPlayer.REPEAT_MODE_OFF
-            }
-            player.repeatMode = newMode
-            _repeatMode.value = newMode
-            println("MusicViewModel: 切换重复模式为: ${
-                when (newMode) {
-                    ExoPlayer.REPEAT_MODE_OFF -> "不重复"
-                    ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
-                    ExoPlayer.REPEAT_MODE_ALL -> "列表循环"
-                    else -> "未知"
+            val currentMode = player.repeatMode
+            val currentShuffle = player.shuffleModeEnabled
+            
+            // 定义循环顺序：列表循环 -> 随机播放 -> 单曲循环
+            val (newMode, newShuffle) = when {
+                currentMode == ExoPlayer.REPEAT_MODE_ALL && !currentShuffle -> {
+                    // 从列表循环切换到随机播放
+                    ExoPlayer.REPEAT_MODE_ALL to true
                 }
-            }")
+                currentMode == ExoPlayer.REPEAT_MODE_ALL && currentShuffle -> {
+                    // 从随机播放切换到单曲循环
+                    ExoPlayer.REPEAT_MODE_ONE to false
+                }
+                else -> {
+                    // 从单曲循环切换到列表循环
+                    ExoPlayer.REPEAT_MODE_ALL to false
+                }
+            }
+            
+            // 更新播放器状态
+            player.repeatMode = newMode
+            player.shuffleModeEnabled = newShuffle
+            _repeatMode.value = newMode
+            _shuffleEnabled.value = newShuffle
+            
+            // 记录日志
+            val modeText = when {
+                newMode == ExoPlayer.REPEAT_MODE_ALL && !newShuffle -> "列表循环"
+                newMode == ExoPlayer.REPEAT_MODE_ALL && newShuffle -> "随机播放"
+                newMode == ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
+                else -> "未知模式"
+            }
+            println("MusicViewModel: 切换播放模式为: $modeText")
         }
+    }
+
+    // 添加检查是否有下一曲的方法
+    fun hasNextSong(): Boolean {
+        return exoPlayer?.hasNextMediaItem() ?: false
+    }
+
+    // 公开的初始化方法
+    fun initializePlayer(audioUrl: String) {
+        setupPlayer(audioUrl)
     }
 }

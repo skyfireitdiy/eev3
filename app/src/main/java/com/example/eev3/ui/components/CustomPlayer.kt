@@ -48,10 +48,8 @@ fun CustomPlayer(
     val lyrics = viewModel.lyrics.collectAsStateWithLifecycle()
     val currentLyricIndex = viewModel.currentLyricIndex.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    
-    // 收集播放进度和时长
-    val currentPosition = viewModel.currentPosition.collectAsStateWithLifecycle()
-    val duration = viewModel.duration.collectAsStateWithLifecycle()
+    val shuffleEnabled = viewModel.shuffleEnabled.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
     
     // 添加自动滚动效果
     LaunchedEffect(currentLyricIndex.value) {
@@ -63,111 +61,145 @@ fun CustomPlayer(
         }
     }
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // 封面图片
-        AsyncImage(
-            model = playerData.coverImage,
-            contentDescription = "封面",
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .padding(32.dp)
-        )
-
-        // 标题
-        Text(
-            text = playerData.title,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(16.dp)
-        )
-
-        // 歌词列表
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(top = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top
-        ) {
-            items(lyrics.value) { lyric ->
-                val isCurrentLyric = lyrics.value.indexOf(lyric) == currentLyricIndex.value
-                Text(
-                    text = lyric.text,
-                    style = if (isCurrentLyric) {
-                        MaterialTheme.typography.titleMedium
-                    } else {
-                        MaterialTheme.typography.bodyMedium
-                    },
-                    color = if (isCurrentLyric) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            vertical = if (isCurrentLyric) 12.dp else 8.dp,
-                            horizontal = 16.dp
-                        ),
-                    textAlign = TextAlign.Center
-                )
+    // 收集提示消息
+    LaunchedEffect(Unit) {
+        viewModel.downloadTip.collect { tip ->
+            tip?.message?.let { message ->
+                if (message.isNotEmpty()) {
+                    snackbarHostState.showSnackbar(message)
+                }
             }
         }
+    }
 
-        // 在播放控制之前添加进度条和时间显示
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+            modifier = modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 进度条
-            Slider(
-                value = currentPosition.value.toFloat(),
-                onValueChange = { viewModel.seekTo(it.toLong()) },
-                valueRange = 0f..maxOf(duration.value.toFloat(), 1f),
-                modifier = Modifier.fillMaxWidth()
+            // 封面图片
+            AsyncImage(
+                model = playerData.coverImage,
+                contentDescription = "封面",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .padding(32.dp)
             )
-            
-            // 时间显示
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+
+            // 标题
+            Text(
+                text = playerData.title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(16.dp)
+            )
+
+            // 歌词列表
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(top = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Top
             ) {
-                // 当前时间
-                Text(
-                    text = formatDuration(currentPosition.value),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                items(lyrics.value) { lyric ->
+                    val isCurrentLyric = lyrics.value.indexOf(lyric) == currentLyricIndex.value
+                    Text(
+                        text = lyric.text,
+                        style = if (isCurrentLyric) {
+                            MaterialTheme.typography.titleMedium
+                        } else {
+                            MaterialTheme.typography.bodyMedium
+                        },
+                        color = if (isCurrentLyric) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                vertical = if (isCurrentLyric) 12.dp else 8.dp,
+                                horizontal = 16.dp
+                            ),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+
+            // 在播放控制之前添加进度条和时间显示
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                // 进度条
+                Slider(
+                    value = viewModel.currentPosition.collectAsStateWithLifecycle().value.toFloat(),
+                    onValueChange = { viewModel.seekTo(it.toLong()) },
+                    valueRange = 0f..maxOf(viewModel.duration.collectAsStateWithLifecycle().value.toFloat(), 1f),
+                    modifier = Modifier.fillMaxWidth()
                 )
                 
-                // 总时长
-                Text(
-                    text = formatDuration(duration.value),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
+                // 时间显示
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // 当前时间
+                    Text(
+                        text = formatDuration(viewModel.currentPosition.collectAsStateWithLifecycle().value),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                    
+                    // 总时长
+                    Text(
+                        text = formatDuration(viewModel.duration.collectAsStateWithLifecycle().value),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
             }
-        }
 
-        // 播放控制
-        PlayerControls(
-            isPlaying = isPlaying,
-            onPlayPause = onPlayPause,
-            onPrevious = onPrevious,
-            onNext = onNext,
-            onRepeatMode = onRepeatMode,
-            onVolumeChange = onVolumeChange,
-            onFavoriteClick = onFavoriteClick,
-            repeatMode = repeatMode,
-            volume = volume,
-            isFavorite = isFavorite,
-            modifier = Modifier.fillMaxWidth()
-        )
+            // 播放控制
+            PlayerControls(
+                isPlaying = isPlaying,
+                onPlayPause = onPlayPause,
+                onPrevious = onPrevious,
+                onNext = {
+                    // 根据当前播放模式处理下一曲
+                    when {
+                        repeatMode == ExoPlayer.REPEAT_MODE_OFF -> {
+                            // 单次播放模式，检查是否有下一曲
+                            if (viewModel.hasNextSong()) onNext()
+                        }
+                        repeatMode == ExoPlayer.REPEAT_MODE_ONE -> {
+                            // 单曲循环模式，直接播放下一曲
+                            onNext()
+                        }
+                        repeatMode == ExoPlayer.REPEAT_MODE_ALL -> {
+                            // 列表循环模式，直接播放下一曲
+                            onNext()
+                        }
+                    }
+                },
+                onRepeatMode = onRepeatMode,
+                onVolumeChange = onVolumeChange,
+                onFavoriteClick = onFavoriteClick,
+                repeatMode = repeatMode,
+                volume = volume,
+                isFavorite = isFavorite,
+                shuffleEnabled = shuffleEnabled.value,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -219,10 +251,11 @@ fun PlayerControls(
     onNext: () -> Unit,
     onRepeatMode: () -> Unit,
     onVolumeChange: (Float) -> Unit,
-    onFavoriteClick: () -> Unit,  // 添加收藏回调
+    onFavoriteClick: () -> Unit,
     repeatMode: Int,
     volume: Float,
-    isFavorite: Boolean,  // 添加收藏状态
+    isFavorite: Boolean,
+    shuffleEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -281,12 +314,18 @@ fun PlayerControls(
             // 循环模式按钮
             IconButton(onClick = onRepeatMode) {
                 Icon(
-                    imageVector = when (repeatMode) {
-                        ExoPlayer.REPEAT_MODE_OFF -> Icons.Default.RepeatOne
-                        ExoPlayer.REPEAT_MODE_ONE -> Icons.Default.Repeat
-                        else -> Icons.Default.RepeatOn
+                    imageVector = when {
+                        repeatMode == ExoPlayer.REPEAT_MODE_ALL && !shuffleEnabled -> Icons.Default.Repeat  // 列表循环
+                        repeatMode == ExoPlayer.REPEAT_MODE_ALL && shuffleEnabled -> Icons.Default.Shuffle  // 随机播放
+                        repeatMode == ExoPlayer.REPEAT_MODE_ONE -> Icons.Default.RepeatOne  // 单曲循环
+                        else -> Icons.Default.Repeat  // 默认显示列表循环图标
                     },
-                    contentDescription = "循环模式"
+                    contentDescription = when {
+                        repeatMode == ExoPlayer.REPEAT_MODE_ALL && !shuffleEnabled -> "列表循环"
+                        repeatMode == ExoPlayer.REPEAT_MODE_ALL && shuffleEnabled -> "随机播放"
+                        repeatMode == ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
+                        else -> "播放模式"
+                    }
                 )
             }
             
