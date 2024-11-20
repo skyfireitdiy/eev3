@@ -790,10 +790,10 @@ class MusicViewModel(
                     val timeMs = minutes.toLong() * 60 * 1000 +
                             seconds.toLong() * 1000 +
                             milliseconds.padEnd(3, '0').toLong()
-                    LyricLine(timeMs, text.trim())
+                    LyricLine(timeMs = timeMs, text = text.trim())  // 使用命名参数
                 }
             }
-            .sortedBy { it.time }
+            .sortedBy { it.timeMs }  // 使用 timeMs 而不是 time
     }
     
     // 更新当前歌位置
@@ -801,7 +801,7 @@ class MusicViewModel(
         val lyrics = _lyrics.value
         if (lyrics.isEmpty()) return
         
-        val index = lyrics.indexOfLast { it.time <= position }
+        val index = lyrics.indexOfLast { it.timeMs <= position }
         if (index != _currentLyricIndex.value) {
             _currentLyricIndex.value = index
         }
@@ -1822,7 +1822,7 @@ class MusicViewModel(
                         println("MusicViewModel: 从服务器下载")
                         // 获取 MV 真实地址并下载
                         val mvUrl = musicCache.getMVUrl(songId)
-                        println("MusicViewModel: 获��到 MV 地址: $mvUrl")
+                        println("MusicViewModel: 获到 MV 地址: $mvUrl")
                         
                         // 缓存 MV
                         val cacheUri = musicCache.cacheMV(songId, mvUrl)
@@ -2019,5 +2019,19 @@ class MusicViewModel(
     private fun stopPositionUpdate() {
         positionUpdateJob?.cancel()
         positionUpdateJob = null
+    }
+
+    // 在 MusicViewModel 类中添加以下方法
+
+    fun updateCurrentLyricIndex() {
+        viewModelScope.launch {
+            val currentPos = _currentPosition.value
+            val newIndex = lyrics.value.indexOfLast { lyric ->
+                lyric.timeMs <= currentPos
+            }
+            if (newIndex != -1) {
+                _currentLyricIndex.value = newIndex
+            }
+        }
     }
 }

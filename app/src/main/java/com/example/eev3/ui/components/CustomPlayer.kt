@@ -51,14 +51,23 @@ fun CustomPlayer(
     val shuffleEnabled = viewModel.shuffleEnabled.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     
-    // 添加自动滚动效果
+    // 修改自动滚动效果的实现
     LaunchedEffect(currentLyricIndex.value) {
-        if (currentLyricIndex.value >= 0) {
-            listState.animateScrollToItem(
-                index = maxOf(0, currentLyricIndex.value - 2),
-                scrollOffset = -100
-            )
+        if (currentLyricIndex.value >= 0 && lyrics.value.isNotEmpty()) {
+            try {
+                listState.animateScrollToItem(
+                    index = (currentLyricIndex.value).coerceIn(0, lyrics.value.size - 1),
+                    scrollOffset = -100
+                )
+            } catch (e: Exception) {
+                // 处理可能的越界异常
+            }
         }
+    }
+
+    // 添加一个新的 LaunchedEffect 来处理播放位置变化
+    LaunchedEffect(viewModel.currentPosition.collectAsStateWithLifecycle().value) {
+        viewModel.updateCurrentLyricIndex()
     }
 
     // 收集提示消息
