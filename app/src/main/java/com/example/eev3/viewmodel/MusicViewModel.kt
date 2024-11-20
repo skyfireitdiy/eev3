@@ -41,6 +41,8 @@ import com.example.eev3.data.DownloadStatus
 import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 
 class MusicViewModel(
     private val favoritesDataStore: FavoritesDataStore,
@@ -209,7 +211,7 @@ class MusicViewModel(
     private val _djDanceSongs = MutableStateFlow<List<ObservableSong>>(emptyList())
     val djDanceSongs: StateFlow<List<ObservableSong>> = _djDanceSongs
 
-    // 每个榜单的加载状态
+    // 每个榜单的加态
     private val _newRankLoadingMore = MutableStateFlow(false)
     val newRankLoadingMore: StateFlow<Boolean> = _newRankLoadingMore
 
@@ -263,7 +265,37 @@ class MusicViewModel(
     private val _shuffleEnabled = MutableStateFlow(false)
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled
 
+    // 添加进度监听
+    private var progressJob: Job? = null
+
+    // 添加播放器配置状态
+    private var playerConfig = PlayerConfig(
+        repeatMode = ExoPlayer.REPEAT_MODE_ALL,
+        shuffleEnabled = false
+    )
+
+    // 数据类来保存播放器配置
+    private data class PlayerConfig(
+        val repeatMode: Int,
+        val shuffleEnabled: Boolean
+    )
+
+    // 添加播放进度监听器
+    private var positionUpdateJob: Job? = null
+
+    // 添加标志位防止重复触发
+    private var isHandlingPlaybackEnd = false
+
+    // 添加标志位表示是否正在加载下一首
+    private var isLoadingNext = false
+
     init {
+        // 设置默认播放模式为列表循环
+        _repeatMode.value = ExoPlayer.REPEAT_MODE_ALL
+        _shuffleEnabled.value = false
+        playerConfig = PlayerConfig(ExoPlayer.REPEAT_MODE_ALL, false)
+        println("MusicViewModel: 初始化播放模式为列表循环")
+        
         // 加载保存的收藏
         viewModelScope.launch {
             favoritesDataStore.favoritesFlow.collect { songs ->
@@ -525,7 +557,7 @@ class MusicViewModel(
         currentPlaylistSource = source
         val playlist = currentPlaylist
         currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
-        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索=$currentPlayingIndex")
         
         _currentPlayingSongState.value = song
         
@@ -560,7 +592,7 @@ class MusicViewModel(
                             cacheFile.toURI().toString()
                         }
                         
-                        // 检查歌词缓存
+                        // 检查歌缓存
                         val lyricsFile = File(context.cacheDir, "lyrics/$songId.lrc")
                         if (lyricsFile.exists()) {
                             println("MusicViewModel: 使用缓存的歌词")
@@ -584,14 +616,14 @@ class MusicViewModel(
                             audioUrl = audioUri
                         )
                         
-                        // 立即启动服务
+                        // 即启动服务
                         withContext(Dispatchers.Main) {
                             println("MusicViewModel: 更新播放数据后启动服务")
                             setupPlayer(audioUri)
                         }
                     } else {
                         // 如果没有本地文件，尝试从网络获取
-                        println("MusicViewModel: 从服器获取数据")
+                        println("MusicViewModel: 从服获取数据")
                         val formBody = FormBody.Builder()
                             .add("id", songId)
                             .add("type", "music")
@@ -655,9 +687,16 @@ class MusicViewModel(
                     }
                 }
             } catch (e: Exception) {
-                println("MusicViewModel: 加载播放数据失败 error=${e.message}")
+                println("MusicViewModel: 加载播放据失败 error=${e.message}")
                 e.printStackTrace()
                 _searchError.value = "加载播放数据失败"
+                
+                // 加载失败时恢复播放当前歌曲
+                if (isHandlingPlaybackEnd) {
+                    println("MusicViewModel: 加载失败，重新播放当前歌曲")
+                    exoPlayer?.seekTo(0)
+                    exoPlayer?.play()
+                }
             }
         }
     }
@@ -691,7 +730,6 @@ class MusicViewModel(
     private fun setupPlayer(audioUrl: String) {
         println("MusicViewModel: 初始化播放器 audioUrl=$audioUrl")
         
-        // 如是同一个URL只需要更新UI状态
         if (audioUrl == currentAudioUrl && exoPlayer != null) {
             println("MusicViewModel: 相同URL，只更新UI状态")
             return
@@ -699,122 +737,83 @@ class MusicViewModel(
         
         currentAudioUrl = audioUrl
         
-        // 保存当前的播放模式
-        val savedRepeatMode = exoPlayer?.repeatMode ?: ExoPlayer.REPEAT_MODE_ALL
-        val savedShuffleEnabled = exoPlayer?.shuffleModeEnabled ?: false
+        // 使用保存的配置
+        println("MusicViewModel: 使用配置: repeatMode=${playerConfig.repeatMode}, shuffle=${playerConfig.shuffleEnabled}")
         
-        // 初始化播放器
         exoPlayer?.release()
-        exoPlayer = ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(audioUrl))
-            prepare()
-            
-            // 恢复播放模式
-            repeatMode = savedRepeatMode
-            shuffleModeEnabled = savedShuffleEnabled
-            _repeatMode.value = savedRepeatMode
-            _shuffleEnabled.value = savedShuffleEnabled
-            
-            addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_READY) {
-                        _duration.value = duration
-                        play()  // 准备就绪后开始播放
-                        _isPlaying.value = true  // 更新播放状态
-                    } else if (state == Player.STATE_ENDED) {
-                        // 播放结束时的处理
-                        when (repeatMode) {
-                            ExoPlayer.REPEAT_MODE_OFF -> {
-                                // 单次播放模式，停止播放
-                                pause()
-                                _isPlaying.value = false
-                                seekTo(0)  // 回到开始位置
-                                println("MusicViewModel: 单次播放模式，播放结束")
-                            }
-                            ExoPlayer.REPEAT_MODE_ONE -> {
-                                // 单曲循环模式，自动重新播放
-                                seekTo(0)
+        exoPlayer = ExoPlayer.Builder(context)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+            .apply {
+                // 先设置播放模式，再添加监听器
+                repeatMode = Player.REPEAT_MODE_OFF  // 始终禁用 ExoPlayer 的自动重复
+                shuffleModeEnabled = playerConfig.shuffleEnabled
+                _repeatMode.value = playerConfig.repeatMode
+                _shuffleEnabled.value = playerConfig.shuffleEnabled
+                
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(state: Int) {
+                        println("MusicViewModel: 播放状态改变: $state")
+                        when (state) {
+                            Player.STATE_READY -> {
+                                println("MusicViewModel: 播放就绪")
+                                _duration.value = duration
                                 play()
-                                println("MusicViewModel: 单曲循环模式，重新播放")
+                                _isPlaying.value = true
+                                startProgressUpdate()
+                                startPositionUpdate()
                             }
-                            ExoPlayer.REPEAT_MODE_ALL -> {
-                                // 列表循环或随机播放模式，播放下一曲
-                                playNext()
-                                println("MusicViewModel: 列表循环/随机播放模式，播放下一曲")
+                            Player.STATE_BUFFERING -> {
+                                println("MusicViewModel: 正在缓冲")
+                            }
+                            Player.STATE_IDLE -> {
+                                println("MusicViewModel: 播放器空闲")
                             }
                         }
                     }
-                }
-                
-                override fun onIsPlayingChanged(playing: Boolean) {
-                    _isPlaying.value = playing
-                    // 播放状态改变时更新通知栏
-                    updateNotification()
-                }
-
-                override fun onRepeatModeChanged(repeatMode: Int) {
-                    _repeatMode.value = repeatMode
-                    println("MusicViewModel: 重复模式改变为: $repeatMode")
-                }
-
-                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                    _shuffleEnabled.value = shuffleModeEnabled
-                    println("MusicViewModel: 随机播放模式改变为: $shuffleModeEnabled")
-                }
-            })
-            
-            // 设置初始音量
-            volume = _volume.value
-        }
-        
-        // 启动进度更新
-        viewModelScope.launch {
-            while (true) {
-                delay(100)
-                exoPlayer?.let {
-                    if (it.isPlaying) {
-                        val position = it.currentPosition
-                        _currentPosition.value = position
-                        updateCurrentLyric(position)
+                    
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        println("MusicViewModel: onIsPlayingChanged: playing=$playing, state=${playbackState}")
+                        _isPlaying.value = playing
+                        
+                        if (playing) {
+                            startProgressUpdate()
+                            startPositionUpdate()
+                        } else {
+                            stopProgressUpdate()
+                            stopPositionUpdate()
+                        }
+                        
+                        updateNotification()
                     }
-                }
+
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        println("MusicViewModel: onMediaItemTransition: reason=$reason")
+                        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                            println("MusicViewModel: 自动切换媒体项，处理播放结束")
+                            handlePlaybackEnd()
+                        }
+                    }
+
+                    override fun onRepeatModeChanged(repeatMode: Int) {
+                        println("MusicViewModel: 忽略 ExoPlayer 重复模式变化: $repeatMode")
+                    }
+
+                    override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                        println("MusicViewModel: 使用配置的随机播放状态: ${playerConfig.shuffleEnabled}")
+                        _shuffleEnabled.value = playerConfig.shuffleEnabled
+                    }
+                })
+                
+                // 设置媒体项
+                setMediaItem(MediaItem.fromUri(audioUrl))
+                
+                // 禁用播放完成时的自动暂停
+                setPlayWhenReady(true)
+                
+                // 准备播放
+                prepare()
             }
-        }
-        
-        // 启动前台服前先检查 PlayerData
-        val playerData = _currentPlayerData.value
-        if (playerData == null) {
-            println("MusicViewModel: 当前没有播放数据，不启动服务")
-            return
-        }
-        
-        // 启动前台服务
-        val serviceIntent = Intent(context, MusicService::class.java).apply {
-            println("MusicViewModel: 准备启动服务，当前播放数据:")
-            println("- 标题: ${playerData.title}")
-            println("- 音频URL: ${playerData.audioUrl}")
-            println("- 封面: ${playerData.coverImage}")
-            putExtra(MusicService.EXTRA_PLAYER_DATA, playerData)
-            putExtra("isPlaying", exoPlayer?.isPlaying ?: false)
-            putExtra("isFavorite", currentPlayingSong?.let { song ->
-                favorites.value.any { it.song.url == song.url }
-            } ?: false)
-        }
-        
-        println("MusicViewModel: 开始启动服务")
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                println("MusicViewModel: 使用 startForegroundService")
-                context.startForegroundService(serviceIntent)
-            } else {
-                println("MusicViewModel: 使用 startService")
-                context.startService(serviceIntent)
-            }
-            println("MusicViewModel: 服务启动成功")
-        } catch (e: Exception) {
-            println("MusicViewModel: 启动服务失败: ${e.message}")
-            e.printStackTrace()
-        }
     }
     
     fun playPause() {
@@ -830,8 +829,8 @@ class MusicViewModel(
     }
     
     fun seekTo(position: Long) {
+        println("MusicViewModel: 跳转到 ${position/1000}秒")
         exoPlayer?.seekTo(position)
-        println("MusicViewModel: 跳转到 ${position/1000}秒")  // 直接显示秒数
     }
     
     fun setVolume(volume: Float) {
@@ -865,6 +864,7 @@ class MusicViewModel(
         
         exoPlayer?.release()
         exoPlayer = null
+        stopProgressUpdate()  // 停止进度更新
     }
 
     fun togglePlayMode() {
@@ -891,112 +891,82 @@ class MusicViewModel(
     fun playNext() {
         println("MusicViewModel: 播放下一曲")
         
-        // 如果是单次播放模式且已经是最后一首，则不播放
-        if (exoPlayer?.repeatMode == ExoPlayer.REPEAT_MODE_OFF) {
-            when (currentPlaylistSource) {
-                PlaylistSource.FAVORITES -> {
-                    val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                    if (currentIndex == _favorites.value.size - 1) {
-                        println("MusicViewModel: 单次播放模式，已是最后一首")
-                        return
-                    }
-                }
-                PlaylistSource.SEARCH -> {
-                    val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                    if (currentIndex == _searchResults.value.size - 1) {
-                        println("MusicViewModel: 单次播放模式，已是最后一首")
-                        return
-                    }
-                }
-                PlaylistSource.NEW_RANK -> {
-                    val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                    if (currentIndex == _newRankSongs.value.size - 1) {
-                        println("MusicViewModel: 单次播放模式，已是最后一首")
-                        return
-                    }
-                }
-                PlaylistSource.TOP_RANK -> {
-                    val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                    if (currentIndex == _topRankSongs.value.size - 1) {
-                        println("MusicViewModel: 单次播放模式，已是最后一首")
-                        return
-                    }
-                }
-                PlaylistSource.DJ_DANCE -> {
-                    val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                    if (currentIndex == _djDanceSongs.value.size - 1) {
-                        println("MusicViewModel: 单次播放模式，已是最后一首")
-                        return
-                    }
-                }
-            }
+        // 如果正在加载下一首，跳过
+        if (isLoadingNext) {
+            println("MusicViewModel: 正在加载下一首，跳过重复请求")
+            return
         }
         
-        when (currentPlaylistSource) {
-            PlaylistSource.FAVORITES -> {
-                val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                if (currentIndex != -1) {
-                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
-                        // 随机播放模式
-                        (0 until _favorites.value.size).random()
-                    } else {
-                        // 列表循环或单次播放模式
-                        (currentIndex + 1) % _favorites.value.size
+        isLoadingNext = true
+        
+        // 停止进度更新
+        stopProgressUpdate()
+        stopPositionUpdate()
+        
+        // 暂停当前播放
+        exoPlayer?.pause()
+        
+        viewModelScope.launch {
+            try {
+                when (currentPlaylistSource) {
+                    PlaylistSource.FAVORITES -> {
+                        val currentIndex = _favorites.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                        if (currentIndex != -1) {
+                            val nextIndex = if (_shuffleEnabled.value) {
+                                (0 until _favorites.value.size).random()
+                            } else {
+                                (currentIndex + 1) % _favorites.value.size
+                            }
+                            loadPlayerData(_favorites.value[nextIndex].song, PlaylistSource.FAVORITES)
+                        }
                     }
-                    loadPlayerData(_favorites.value[nextIndex].song, PlaylistSource.FAVORITES)
-                }
-            }
-            PlaylistSource.SEARCH -> {
-                val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                if (currentIndex != -1) {
-                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
-                        // 随机播放模式
-                        (0 until _searchResults.value.size).random()
-                    } else {
-                        // 列表循环或单次播放模式
-                        (currentIndex + 1) % _searchResults.value.size
+                    PlaylistSource.SEARCH -> {
+                        val currentIndex = _searchResults.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                        if (currentIndex != -1) {
+                            val nextIndex = if (_shuffleEnabled.value) {
+                                (0 until _searchResults.value.size).random()
+                            } else {
+                                (currentIndex + 1) % _searchResults.value.size
+                            }
+                            loadPlayerData(_searchResults.value[nextIndex].song, PlaylistSource.SEARCH)
+                        }
                     }
-                    loadPlayerData(_searchResults.value[nextIndex].song, PlaylistSource.SEARCH)
-                }
-            }
-            PlaylistSource.NEW_RANK -> {
-                val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                if (currentIndex != -1) {
-                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
-                        // 随机播放模式
-                        (0 until _newRankSongs.value.size).random()
-                    } else {
-                        // 列表循环或单次播放模式
-                        (currentIndex + 1) % _newRankSongs.value.size
+                    PlaylistSource.NEW_RANK -> {
+                        val currentIndex = _newRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                        if (currentIndex != -1) {
+                            val nextIndex = if (_shuffleEnabled.value) {
+                                (0 until _newRankSongs.value.size).random()
+                            } else {
+                                (currentIndex + 1) % _newRankSongs.value.size
+                            }
+                            loadPlayerData(_newRankSongs.value[nextIndex].song, PlaylistSource.NEW_RANK)
+                        }
                     }
-                    loadPlayerData(_newRankSongs.value[nextIndex].song, PlaylistSource.NEW_RANK)
-                }
-            }
-            PlaylistSource.TOP_RANK -> {
-                val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                if (currentIndex != -1) {
-                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
-                        // 随机播放模式
-                        (0 until _topRankSongs.value.size).random()
-                    } else {
-                        // 列表循环或单次播放模式
-                        (currentIndex + 1) % _topRankSongs.value.size
+                    PlaylistSource.TOP_RANK -> {
+                        val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                        if (currentIndex != -1) {
+                            val nextIndex = if (_shuffleEnabled.value) {
+                                (0 until _topRankSongs.value.size).random()
+                            } else {
+                                (currentIndex + 1) % _topRankSongs.value.size
+                            }
+                            loadPlayerData(_topRankSongs.value[nextIndex].song, PlaylistSource.TOP_RANK)
+                        }
                     }
-                    loadPlayerData(_topRankSongs.value[nextIndex].song, PlaylistSource.TOP_RANK)
-                }
-            }
-            PlaylistSource.DJ_DANCE -> {
-                val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
-                if (currentIndex != -1) {
-                    val nextIndex = if (exoPlayer?.shuffleModeEnabled == true) {
-                        // 随机播放模式
-                        (0 until _djDanceSongs.value.size).random()
-                    } else {
-                        // 列表循环或单次播放模式
-                        (currentIndex + 1) % _djDanceSongs.value.size
+                    PlaylistSource.DJ_DANCE -> {
+                        val currentIndex = _djDanceSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
+                        if (currentIndex != -1) {
+                            val nextIndex = if (_shuffleEnabled.value) {
+                                (0 until _djDanceSongs.value.size).random()
+                            } else {
+                                (currentIndex + 1) % _djDanceSongs.value.size
+                            }
+                            loadPlayerData(_djDanceSongs.value[nextIndex].song, PlaylistSource.DJ_DANCE)
+                        }
                     }
-                    loadPlayerData(_djDanceSongs.value[nextIndex].song, PlaylistSource.DJ_DANCE)
                 }
+            } finally {
+                isLoadingNext = false
             }
         }
     }
@@ -1032,7 +1002,7 @@ class MusicViewModel(
                 PlaylistSource.TOP_RANK -> {
                     val currentIndex = _topRankSongs.value.indexOfFirst { it.song.url == currentPlayingSong?.url }
                     if (currentIndex == 0) {
-                        println("MusicViewModel: 单次播放式，已是第一首")
+                        println("MusicViewModel: 单播放式，已是第一首")
                         return
                     }
                 }
@@ -1054,7 +1024,7 @@ class MusicViewModel(
                         // 随机播放模式
                         (0 until _favorites.value.size).random()
                     } else {
-                        // 列表循环或单次播放模式
+                        // 列表循环模式
                         (currentIndex - 1 + _favorites.value.size) % _favorites.value.size
                     }
                     loadPlayerData(_favorites.value[prevIndex].song, PlaylistSource.FAVORITES)
@@ -1137,7 +1107,7 @@ class MusicViewModel(
             shouldResumePlayback = exoPlayer?.isPlaying ?: false
             lastPosition = exoPlayer?.currentPosition ?: 0
         } else {
-            // 界面显示时，如果需要则恢复播放
+            // 界面显示时，如果需要则复播放
             if (shouldResumePlayback) {
                 exoPlayer?.play()
             }
@@ -1301,15 +1271,15 @@ class MusicViewModel(
                             path = targetFile.absolutePath
                         )
                     } else {
-                        throw Exception("文件复制失败")
+                        throw Exception("文复制失")
                     }
                 }
             } catch (e: Exception) {
-                println("MusicViewModel: 下载失败 error=${e.message}")
+                println("MusicViewModel: 下载败 error=${e.message}")
                 e.printStackTrace()
                 _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
                 _downloadTip.value = DownloadTip(
-                    message = "下载失败: ${e.message ?: "未知错误"}"
+                    message = "下载败: ${e.message ?: "未知错误"}"
                 )
             }
         }
@@ -1604,42 +1574,37 @@ class MusicViewModel(
         }
     }
 
-    // 修改播放束时的处理
+    // 处理播放结束
     private fun handlePlaybackEnd() {
-        println("MusicViewModel: 播放结束，切换到下一首")
-        val playlist = currentPlaylist
-        if (playlist.isEmpty()) {
-            println("MusicViewModel: 播放列表为空，停止播放")
+        if (isHandlingPlaybackEnd) {
+            println("MusicViewModel: 正在处理播放结束，跳过重复触发")
             return
         }
         
-        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
+        isHandlingPlaybackEnd = true
+        println("MusicViewModel: 处理播放结束")
         
-        when (_playMode.value) {
-            PlayMode.SEQUENCE -> {
-                // 顺序播放，播放下一首
-                if (currentPlayingIndex >= 0 && currentPlayingIndex < playlist.size) {
-                    val nextIndex = if (currentPlayingIndex + 1 >= playlist.size) 0 
-                                  else currentPlayingIndex + 1
-                    println("MusicViewModel: 顺序播放下一首，当前索引=$currentPlayingIndex, 下一首索引=$nextIndex")
-                    loadPlayerData(playlist[nextIndex], currentPlaylistSource)
-                } else {
-                    println("MusicViewModel: 当前索引无效: $currentPlayingIndex")
+        viewModelScope.launch(Dispatchers.Main) {
+            try {
+                when {
+                    playerConfig.repeatMode == ExoPlayer.REPEAT_MODE_ONE -> {
+                        println("MusicViewModel: 单曲循环模式，重新播放")
+                        // 保持进度显示在结束位置
+                        _currentPosition.value = exoPlayer?.duration ?: 0
+                        exoPlayer?.seekTo(0)
+                        exoPlayer?.play()
+                    }
+                    playerConfig.repeatMode == ExoPlayer.REPEAT_MODE_ALL -> {
+                        println("MusicViewModel: 列表循环/随机播放模式，播放下一曲")
+                        // 直接切换下一曲，不更新当前进度
+                        playNext()
+                    }
                 }
-            }
-            PlayMode.SINGLE_LOOP -> {
-                println("MusicViewModel: 单曲循环，重新播放")
-                exoPlayer?.seekTo(0)
-                exoPlayer?.play()
-            }
-            PlayMode.RANDOM -> {
-                // 随机播放，随机选择一首
-                val nextIndex = (0 until playlist.size).random()
-                println("MusicViewModel: 随机播放，选择索引=$nextIndex")
-                loadPlayerData(playlist[nextIndex], currentPlaylistSource)
-            }
-            PlayMode.ONCE -> {
-                println("MusicViewModel: 单次播放模式，播放束")
+                
+                // 延迟重置标志位，确保新的播放已经开始
+                delay(500)
+            } finally {
+                isHandlingPlaybackEnd = false
             }
         }
     }
@@ -1660,7 +1625,7 @@ class MusicViewModel(
                 val songId = song.url.substringAfterLast("/").substringBefore(".html")
                 val sanitizedTitle = sanitizeFileName(song.title)
                 
-                // 检查是否已下
+                // 检查是否已下载
                 val downloadedFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "$sanitizedTitle.mp4")
                 if (downloadedFile.exists()) {
                     println("MusicViewModel: 使用已下载的 MV")
@@ -1678,7 +1643,7 @@ class MusicViewModel(
                     
                     // 显示提示
                     _downloadTip.value = DownloadTip(
-                        message = "正在播放已载的 MV"
+                        message = "正在播放已下载的 MV"
                     )
                     
                     // 启动播放器
@@ -1747,12 +1712,12 @@ class MusicViewModel(
         
         viewModelScope.launch {
             try {
-                println("MusicViewModel: 始下载 MV ${song.title}")
+                println("MusicViewModel: 开始下载 MV ${song.title}")
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 // 显示开始下载提示
                 _downloadTip.value = DownloadTip(
-                    message = "开始下载 MV，由于文件较，可能需要一些时间，请耐心等待..."
+                    message = "开始下载 MV，由于文件较大，可能需要一些时间，请耐心等待..."
                 )
                 
                 withContext(Dispatchers.IO) {
@@ -1769,7 +1734,7 @@ class MusicViewModel(
                     // 检查是否已缓存
                     val cacheFile = File(context.cacheDir, "mv/$songId.mp4")
                     if (cacheFile.exists()) {
-                        println("MusicViewModel: 使用缓的 MV")
+                        println("MusicViewModel: 使用缓存的 MV")
                         // 复制到下载目录
                         println("MusicViewModel: 复制到下载目录")
                         cacheFile.copyTo(targetFile, overwrite = true)
@@ -1793,8 +1758,8 @@ class MusicViewModel(
                     
                     // 确保文件已经复制成功
                     if (targetFile.exists() && targetFile.length() > 0) {
-                        println("MusicViewModel: MV 下载成 path=${targetFile.absolutePath}")
-                        // 通知系���媒体库更新
+                        println("MusicViewModel: MV 下载完成 path=${targetFile.absolutePath}")
+                        // 通知系统媒体库更新
                         MediaScannerConnection.scanFile(
                             context,
                             arrayOf(targetFile.absolutePath),
@@ -1860,41 +1825,48 @@ class MusicViewModel(
 
     // 切换重复模式
     fun toggleRepeatMode() {
-        exoPlayer?.let { player ->
-            val currentMode = player.repeatMode
-            val currentShuffle = player.shuffleModeEnabled
-            
-            // 定义循环顺序：列表循环 -> 随机播放 -> 单曲循环
-            val (newMode, newShuffle) = when {
-                currentMode == ExoPlayer.REPEAT_MODE_ALL && !currentShuffle -> {
-                    // 从列表循环切换到随机播放
-                    ExoPlayer.REPEAT_MODE_ALL to true
-                }
-                currentMode == ExoPlayer.REPEAT_MODE_ALL && currentShuffle -> {
-                    // 从随机播放切换到单曲循环
-                    ExoPlayer.REPEAT_MODE_ONE to false
-                }
-                else -> {
-                    // 从单曲循环切换到列表循环
-                    ExoPlayer.REPEAT_MODE_ALL to false
-                }
+        println("MusicViewModel: 当前播放模式: repeatMode=${_repeatMode.value}, shuffle=${_shuffleEnabled.value}")
+        
+        val (newMode, newShuffle) = when {
+            _repeatMode.value == ExoPlayer.REPEAT_MODE_ALL && !_shuffleEnabled.value -> {
+                println("MusicViewModel: 切换到随机播放模式")
+                ExoPlayer.REPEAT_MODE_ALL to true
             }
-            
-            // 更新播放器状态
+            _repeatMode.value == ExoPlayer.REPEAT_MODE_ALL && _shuffleEnabled.value -> {
+                println("MusicViewModel: 切换到单曲循环模式")
+                ExoPlayer.REPEAT_MODE_ONE to false
+            }
+            _repeatMode.value == ExoPlayer.REPEAT_MODE_ONE -> {
+                println("MusicViewModel: 切换到列表循环模式")
+                ExoPlayer.REPEAT_MODE_ALL to false
+            }
+            else -> {
+                println("MusicViewModel: 切换到默认的列表循环模式")
+                ExoPlayer.REPEAT_MODE_ALL to false
+            }
+        }
+        
+        // 更新配置
+        playerConfig = PlayerConfig(newMode, newShuffle)
+        
+        // 更新状态
+        _repeatMode.value = newMode
+        _shuffleEnabled.value = newShuffle
+        
+        // 更新播放器状态
+        exoPlayer?.let { player ->
             player.repeatMode = newMode
             player.shuffleModeEnabled = newShuffle
-            _repeatMode.value = newMode
-            _shuffleEnabled.value = newShuffle
-            
-            // 记录日志
-            val modeText = when {
-                newMode == ExoPlayer.REPEAT_MODE_ALL && !newShuffle -> "列表循环"
-                newMode == ExoPlayer.REPEAT_MODE_ALL && newShuffle -> "随机播放"
-                newMode == ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
-                else -> "未知模式"
-            }
-            println("MusicViewModel: 切换播放模式为: $modeText")
         }
+        
+        // 记录日志
+        val modeText = when {
+            newMode == ExoPlayer.REPEAT_MODE_ALL && !newShuffle -> "列表循环"
+            newMode == ExoPlayer.REPEAT_MODE_ALL && newShuffle -> "随机播放"
+            newMode == ExoPlayer.REPEAT_MODE_ONE -> "单曲循环"
+            else -> "未知模式"
+        }
+        println("MusicViewModel: 切换播放模式为: $modeText")
     }
 
     // 添加检查是否有下一曲的方法
@@ -1905,5 +1877,67 @@ class MusicViewModel(
     // 公开的初始化方法
     fun initializePlayer(audioUrl: String) {
         setupPlayer(audioUrl)
+    }
+
+    // 添加开始更新进度的方法
+    private fun startProgressUpdate() {
+        progressJob?.cancel()
+        progressJob = viewModelScope.launch {
+            while (isActive) {
+                exoPlayer?.let { player ->
+                    _currentPosition.value = player.currentPosition
+                    
+                    // 检查是否播放结束
+                    if (player.currentPosition >= player.duration && player.duration > 0) {
+                        println("MusicViewModel: 检测到播放结束")
+                        handlePlaybackEnd()
+                        progressJob?.cancel()  // 取消当前任务
+                        return@launch  // 使用 return@launch 替代 break
+                    }
+                }
+                delay(200)  // 更频繁地检查进度
+            }
+        }
+    }
+
+    // 添加停止更新进度的方法
+    private fun stopProgressUpdate() {
+        progressJob?.cancel()
+        progressJob = null
+    }
+
+    // 添加播放进度监听器
+    private fun startPositionUpdate() {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = viewModelScope.launch {
+            while (isActive) {
+                exoPlayer?.let { player ->
+                    val position = player.currentPosition
+                    val duration = player.duration
+                    
+                    // 只在正常播放时更新进度
+                    if (!isHandlingPlaybackEnd) {
+                        _currentPosition.value = position
+                    }
+
+                    // 检查是否播放到末尾，提前200ms触发切换
+                    if (!isHandlingPlaybackEnd && duration > 0 && position >= duration - 200) {
+                        println("MusicViewModel: 检测到播放接近结束: position=$position, duration=$duration")
+                        // 保持当前进度显示
+                        _currentPosition.value = duration
+                        handlePlaybackEnd()
+                        positionUpdateJob?.cancel()
+                        return@launch
+                    }
+                }
+                delay(100)
+            }
+        }
+    }
+
+    // 添加停止播放进度监听器的方法
+    private fun stopPositionUpdate() {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = null
     }
 }
