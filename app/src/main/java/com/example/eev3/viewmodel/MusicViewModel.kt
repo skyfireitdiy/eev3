@@ -553,11 +553,11 @@ class MusicViewModel(
     fun loadPlayerData(song: Song, source: PlaylistSource) {
         println("MusicViewModel: 开始播放 ${song.title}")
         
-        // 更新播放列来源和索引
+        // 更新播放列表来源和索引
         currentPlaylistSource = source
         val playlist = currentPlaylist
         currentPlayingIndex = playlist.indexOfFirst { it.url == song.url }
-        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索=$currentPlayingIndex")
+        println("MusicViewModel: 播放列表大小=${playlist.size}, 当前索引=$currentPlayingIndex")
         
         _currentPlayingSongState.value = song
         
@@ -592,21 +592,60 @@ class MusicViewModel(
                             cacheFile.toURI().toString()
                         }
                         
-                        // 检查歌缓存
+                        // 检查歌词缓存
                         val lyricsFile = File(context.cacheDir, "lyrics/$songId.lrc")
                         if (lyricsFile.exists()) {
                             println("MusicViewModel: 使用缓存的歌词")
                             val lyricsContent = lyricsFile.readText()
                             _lyrics.value = parseLyrics(lyricsContent)
+                        } else {
+                            // 歌词缓存不存在，从远程获取
+                            println("MusicViewModel: 歌词缓存不存在，从远程获取")
+                            val lrcUrl = "$BASE_URL/plug/down.php?ac=music&lk=lrc&id=$songId"
+                            val lrcRequest = Request.Builder()
+                                .url(lrcUrl)
+                                .build()
+                            
+                            client.newCall(lrcRequest).execute().use { lrcResponse ->
+                                val lrcContent = lrcResponse.body?.string() ?: ""
+                                println("MusicViewModel: 缓存新获取的歌词")
+                                val lyricsUri = musicCache.cacheLyrics(song.url, lrcContent)
+                                println("MusicViewModel: 歌词缓存完成 lyricsUri=$lyricsUri")
+                                _lyrics.value = parseLyrics(lrcContent)
+                            }
                         }
                         
                         // 检查封面缓存
                         val coverFile = File(context.cacheDir, "covers/$songId.jpg")
                         val coverUri = if (coverFile.exists()) {
-                            println("MusicViewModel: 使用缓的封面")
+                            println("MusicViewModel: 使用缓存的封面")
                             coverFile.toURI().toString()
                         } else {
-                            null
+                            // 封面缓存不存在，从远程获取
+                            println("MusicViewModel: 封面缓存不存在，从远程获取")
+                            val formBody = FormBody.Builder()
+                                .add("id", songId)
+                                .add("type", "music")
+                                .build()
+                            
+                            val request = Request.Builder()
+                                .url("$BASE_URL/js/play.php")
+                                .post(formBody)
+                                .build()
+                            
+                            var newCoverUri: String? = null
+                            client.newCall(request).execute().use { response ->
+                                val responseBody = response.body?.string()
+                                if (responseBody != null) {
+                                    val playResponse = gson.fromJson(responseBody, PlayResponse::class.java)
+                                    if (playResponse.msg == 1) {
+                                        println("MusicViewModel: 缓存新获取的封面")
+                                        newCoverUri = musicCache.cacheCover(song.url, playResponse.pic)
+                                        println("MusicViewModel: 封面缓存完成 coverUri=$newCoverUri")
+                                    }
+                                }
+                            }
+                            newCoverUri
                         }
                         
                         // 更新播放器数据
@@ -616,7 +655,7 @@ class MusicViewModel(
                             audioUrl = audioUri
                         )
                         
-                        // 即启动服务
+                        // 立即启动服务
                         withContext(Dispatchers.Main) {
                             println("MusicViewModel: 更新播放数据后启动服务")
                             setupPlayer(audioUri)
@@ -687,11 +726,10 @@ class MusicViewModel(
                     }
                 }
             } catch (e: Exception) {
-                println("MusicViewModel: 加载播放据失败 error=${e.message}")
+                println("MusicViewModel: 加载播放数据失败 error=${e.message}")
                 e.printStackTrace()
                 _searchError.value = "加载播放数据失败"
                 
-                // 加载失败时恢复播放当前歌曲
                 if (isHandlingPlaybackEnd) {
                     println("MusicViewModel: 加载失败，重新播放当前歌曲")
                     exoPlayer?.seekTo(0)
@@ -1434,7 +1472,7 @@ class MusicViewModel(
         }
     }
 
-    // 修改内部加载方法，添加成功回调
+    // 修��内部加载方法，添加成功回调
     private fun loadRankSongsInternal(
         type: RankType,
         page: Int,
