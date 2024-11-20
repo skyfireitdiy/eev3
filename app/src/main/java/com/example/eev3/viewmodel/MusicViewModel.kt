@@ -514,6 +514,7 @@ class MusicViewModel(
         // 更新收藏列表
         val currentFavorites = _favorites.value.toMutableList()
         val existingSong = currentFavorites.find { it.song.url == song.song.url }
+        val newFavoriteState = existingSong == null // 如果不在收藏列表中，则为新的收藏状态
         
         if (existingSong != null) {
             // 歌曲已在收藏列表中，移除它
@@ -528,6 +529,47 @@ class MusicViewModel(
         }
         
         _favorites.value = currentFavorites
+        
+        // 同步更新搜索结果列表中的收藏状态
+        _searchResults.value.forEach { 
+            if (it.song.url == song.song.url) {
+                it.isFavorite = newFavoriteState
+            }
+        }
+        
+        // 同步更新新歌榜列表中的收藏状态
+        _newRankSongs.value.forEach {
+            if (it.song.url == song.song.url) {
+                it.isFavorite = newFavoriteState
+            }
+        }
+        
+        // 同步更新TOP榜列表中的收藏状态
+        _topRankSongs.value.forEach {
+            if (it.song.url == song.song.url) {
+                it.isFavorite = newFavoriteState
+            }
+        }
+        
+        // 同步更新DJ舞曲列表中的收藏状态
+        _djDanceSongs.value.forEach {
+            if (it.song.url == song.song.url) {
+                it.isFavorite = newFavoriteState
+            }
+        }
+        
+        // 同步更新当前播放歌曲的收藏状态
+        currentPlayingSong = currentPlayingSong?.let {
+            if (it.url == song.song.url) {
+                it.copy(isFavorite = newFavoriteState)
+            } else it
+        }
+        
+        // 强制触发状态更新
+        _searchResults.value = ArrayList(_searchResults.value)
+        _newRankSongs.value = ArrayList(_newRankSongs.value)
+        _topRankSongs.value = ArrayList(_topRankSongs.value)
+        _djDanceSongs.value = ArrayList(_djDanceSongs.value)
         
         // 保存更新后的收藏列表
         viewModelScope.launch {
@@ -686,7 +728,7 @@ class MusicViewModel(
                                     // 更新缓存大小
                                     updateCacheSize()
                                     
-                                    println("MusicViewModel: 开始缓存封面")
+                                    println("MusicViewModel: 开始缓存封")
                                     val coverUri = musicCache.cacheCover(song.url, playResponse.pic)
                                     println("MusicViewModel: 封面缓存完成 coverUri=$coverUri")
                                     
@@ -1472,7 +1514,7 @@ class MusicViewModel(
         }
     }
 
-    // 修��内部加载方法，添加成功回调
+    // 修内部加载方法，添加成功回调
     private fun loadRankSongsInternal(
         type: RankType,
         page: Int,
@@ -1780,7 +1822,7 @@ class MusicViewModel(
                         println("MusicViewModel: 从服务器下载")
                         // 获取 MV 真实地址并下载
                         val mvUrl = musicCache.getMVUrl(songId)
-                        println("MusicViewModel: 获取到 MV 地址: $mvUrl")
+                        println("MusicViewModel: 获��到 MV 地址: $mvUrl")
                         
                         // 缓存 MV
                         val cacheUri = musicCache.cacheMV(songId, mvUrl)
