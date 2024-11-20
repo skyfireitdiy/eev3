@@ -289,6 +289,9 @@ class MusicViewModel(
     // 添加标志位表示是否正在加载下一首
     private var isLoadingNext = false
 
+    // Add a coroutine job to track the current tip dismissal
+    private var tipDismissalJob: Job? = null
+
     init {
         // 设置默认播放模式为列表循环
         _repeatMode.value = ExoPlayer.REPEAT_MODE_ALL
@@ -945,6 +948,7 @@ class MusicViewModel(
         exoPlayer?.release()
         exoPlayer = null
         stopProgressUpdate()  // 停止进度更新
+        tipDismissalJob?.cancel()
     }
 
     fun togglePlayMode() {
@@ -1233,19 +1237,19 @@ class MusicViewModel(
                 dismissClearCacheDialog()
                 
                 // 显示提示
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = if (currentSongUrl != null) {
                         "已清除缓存（保留当前播放歌曲）"
                     } else {
-                        "已清除全部缓"
+                        "已清除全部缓存"
                     }
-                )
+                ))
             } catch (e: Exception) {
                 println("MusicViewModel: 清除缓存失败: ${e.message}")
                 e.printStackTrace()
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "清除缓存失败: ${e.message ?: "未知错误"}"
-                )
+                ))
             }
         }
     }
@@ -1346,10 +1350,10 @@ class MusicViewModel(
                             ))
                         }
                         
-                        _downloadTip.value = DownloadTip(
+                        showTipWithAutoDismiss(DownloadTip(
                             message = "下载完成",
                             path = targetFile.absolutePath
-                        )
+                        ))
                     } else {
                         throw Exception("文复制失")
                     }
@@ -1358,15 +1362,16 @@ class MusicViewModel(
                 println("MusicViewModel: 下载败 error=${e.message}")
                 e.printStackTrace()
                 _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "下载败: ${e.message ?: "未知错误"}"
-                )
+                ))
             }
         }
     }
 
     // 清除提示
     fun clearDownloadTip() {
+        tipDismissalJob?.cancel()
         _downloadTip.value = null
     }
 
@@ -1454,7 +1459,7 @@ class MusicViewModel(
                     onSuccess = { 
                         hasLoadedNewRank = true
                         if (isRefresh) {
-                            _downloadTip.value = DownloadTip(message = "新歌榜刷新成功")
+                            showTipWithAutoDismiss(DownloadTip(message = "新歌榜刷新成功"))
                         }
                     }
                 )
@@ -1480,7 +1485,7 @@ class MusicViewModel(
                     onSuccess = { 
                         hasLoadedTopRank = true
                         if (isRefresh) {
-                            _downloadTip.value = DownloadTip(message = "TOP榜刷新成功")
+                            showTipWithAutoDismiss(DownloadTip(message = "TOP榜刷新成功"))
                         }
                     }
                 )
@@ -1506,7 +1511,7 @@ class MusicViewModel(
                     onSuccess = { 
                         hasLoadedDjDance = true
                         if (isRefresh) {
-                            _downloadTip.value = DownloadTip(message = "DJ舞曲刷新成功")
+                            showTipWithAutoDismiss(DownloadTip(message = "DJ舞曲刷新成功"))
                         }
                     }
                 )
@@ -1722,9 +1727,9 @@ class MusicViewModel(
                     }
                     
                     // 显示提示
-                    _downloadTip.value = DownloadTip(
+                    showTipWithAutoDismiss(DownloadTip(
                         message = "正在播放已下载的 MV"
-                    )
+                    ))
                     
                     // 启动播放器
                     context.startActivity(intent)
@@ -1742,9 +1747,9 @@ class MusicViewModel(
                     )
                 } else {
                     // 显示开始缓存提示
-                    _downloadTip.value = DownloadTip(
+                    showTipWithAutoDismiss(DownloadTip(
                         message = "正在准备 MV，由于文件较大，可能需要一些时间，请耐心等待..."
-                    )
+                    ))
                     
                     println("MusicViewModel: 获取 MV 地址")
                     val mvUrl = musicCache.getMVUrl(songId)
@@ -1768,18 +1773,18 @@ class MusicViewModel(
                 }
                 
                 // 显示缓存完成提示
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "MV 已准备就绪"
-                )
+                ))
                 
                 // 启动播放器
                 context.startActivity(intent)
             } catch (e: Exception) {
                 println("MusicViewModel: MV 播放失败: ${e.message}")
                 e.printStackTrace()
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "MV 播放失败: ${e.message}"
-                )
+                ))
             } finally {
                 _mvCaching.value = false
             }
@@ -1796,9 +1801,9 @@ class MusicViewModel(
                 _downloadStatus.update { it + (song.url to DownloadStatus.Downloading) }
                 
                 // 显示开始下载提示
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "开始下载 MV，由于文件较大，可能需要一些时间，请耐心等待..."
-                )
+                ))
                 
                 withContext(Dispatchers.IO) {
                     val songId = song.url.substringAfterLast("/").substringBefore(".html")
@@ -1860,10 +1865,10 @@ class MusicViewModel(
                         // 更新缓存大小
                         updateCacheSize()
                         
-                        _downloadTip.value = DownloadTip(
+                        showTipWithAutoDismiss(DownloadTip(
                             message = "MV 下载完成",
                             path = targetFile.absolutePath
-                        )
+                        ))
                     } else {
                         throw Exception("MV 文件复制失败")
                     }
@@ -1872,9 +1877,9 @@ class MusicViewModel(
                 println("MusicViewModel: MV 下载失败 error=${e.message}")
                 e.printStackTrace()
                 _downloadStatus.update { it + (song.url to DownloadStatus.Error(e.message ?: "下载失败")) }
-                _downloadTip.value = DownloadTip(
+                showTipWithAutoDismiss(DownloadTip(
                     message = "MV 下载失败: ${e.message ?: "未知错误"}"
-                )
+                ))
             }
         }
     }
@@ -2032,6 +2037,21 @@ class MusicViewModel(
             if (newIndex != -1) {
                 _currentLyricIndex.value = newIndex
             }
+        }
+    }
+
+    // Modify the _downloadTip update logic to auto-dismiss after 2 seconds
+    private fun showTipWithAutoDismiss(tip: DownloadTip) {
+        // Cancel any existing dismissal job
+        tipDismissalJob?.cancel()
+        
+        // Show the new tip
+        _downloadTip.value = tip
+        
+        // Start a new dismissal job
+        tipDismissalJob = viewModelScope.launch {
+            delay(2000) // Wait for 2 seconds
+            _downloadTip.value = null
         }
     }
 }
