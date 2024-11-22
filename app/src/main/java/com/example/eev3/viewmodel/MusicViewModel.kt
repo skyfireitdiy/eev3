@@ -43,6 +43,7 @@ import androidx.core.content.FileProvider
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import com.example.eev3.data.ImportMode
 
 class MusicViewModel(
     private val favoritesDataStore: FavoritesDataStore,
@@ -257,7 +258,7 @@ class MusicViewModel(
     private val _repeatMode = MutableStateFlow(ExoPlayer.REPEAT_MODE_ALL)
     val repeatMode: StateFlow<Int> = _repeatMode
 
-    // 添加音量状态
+    // 添加音量��态
     private val _volume = MutableStateFlow(1f)  // 默认音量为1（最大）
     val volume: StateFlow<Float> = _volume
 
@@ -291,6 +292,16 @@ class MusicViewModel(
 
     // Add a coroutine job to track the current tip dismissal
     private var tipDismissalJob: Job? = null
+
+    // 添加导入模式枚举
+    enum class ImportMode {
+        OVERRIDE,  // 覆盖
+        MERGE      // 合并
+    }
+
+    // 添加状态
+    private val _showImportDialog = MutableStateFlow<List<Song>?>(null)
+    val showImportDialog = _showImportDialog.asStateFlow()
 
     init {
         // 设置默认播放模式为列表循环
@@ -912,7 +923,7 @@ class MusicViewModel(
     }
     
     fun seekTo(position: Long) {
-        println("MusicViewModel: 跳转到 ${position/1000}秒")
+        println("MusicViewModel: 跳转��� ${position/1000}秒")
         exoPlayer?.seekTo(position)
     }
     
@@ -1057,7 +1068,7 @@ class MusicViewModel(
 
     // 修改播放上一曲的方法
     fun playPrevious() {
-        println("MusicViewModel: 播放上一曲")
+        println("MusicViewModel: ���放上一曲")
         
         // 如果是单次播放模式且已经是第一首，则不播放
         if (exoPlayer?.repeatMode == ExoPlayer.REPEAT_MODE_OFF) {
@@ -2053,5 +2064,82 @@ class MusicViewModel(
             delay(2000) // Wait for 2 seconds
             _downloadTip.value = null
         }
+    }
+
+    // 导出收藏列表
+    fun exportFavorites(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                favoritesDataStore.exportFavorites(uri)
+                showTipWithAutoDismiss(DownloadTip(
+                    message = "收藏列表导出成功",
+                    path = uri.toString()
+                ))
+            } catch (e: Exception) {
+                println("MusicViewModel: 导出收藏列表失败: ${e.message}")
+                e.printStackTrace()
+                showTipWithAutoDismiss(DownloadTip(
+                    message = "导出失败: ${e.message ?: "未知错误"}"
+                ))
+            }
+        }
+    }
+
+    // 导入收藏列表预览
+    fun importFavoritesPreview(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val importedSongs = favoritesDataStore.importFavorites(uri)
+                if (importedSongs.isEmpty()) {
+                    showTipWithAutoDismiss(DownloadTip(
+                        message = "导入失败: 文件格式错误或为空"
+                    ))
+                } else {
+                    _showImportDialog.value = importedSongs
+                }
+            } catch (e: Exception) {
+                println("MusicViewModel: 导入收藏列表失败: ${e.message}")
+                e.printStackTrace()
+                showTipWithAutoDismiss(DownloadTip(
+                    message = "导入失败: ${e.message ?: "未知错误"}"
+                ))
+            }
+        }
+    }
+
+    // 确认导入收藏列表
+    fun confirmImport(mode: ImportMode) {
+        viewModelScope.launch {
+            try {
+                val importedSongs = _showImportDialog.value ?: return@launch
+                val currentFavorites = _favorites.value.map { it.song }
+                
+                val newFavorites = when (mode) {
+                    ImportMode.OVERRIDE -> importedSongs
+                    ImportMode.MERGE -> {
+                        // 合并时去重
+                        (currentFavorites + importedSongs).distinctBy { it.url }
+                    }
+                }
+                
+                // 保存新的收藏列表
+                favoritesDataStore.saveFavorites(newFavorites)
+                
+                showTipWithAutoDismiss(DownloadTip(
+                    message = when (mode) {
+                        ImportMode.OVERRIDE -> "已覆盖导入 ${importedSongs.size} 首歌曲"
+                        ImportMode.MERGE -> "已合并导入 ${importedSongs.size} 首歌曲"
+                    }
+                ))
+            } finally {
+                // 关闭导入对话框
+                _showImportDialog.value = null
+            }
+        }
+    }
+
+    // 取消导入
+    fun cancelImport() {
+        _showImportDialog.value = null
     }
 }

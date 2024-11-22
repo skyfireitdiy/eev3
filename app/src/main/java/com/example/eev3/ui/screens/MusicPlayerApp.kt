@@ -1,7 +1,11 @@
 package com.example.eev3.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,6 +18,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,8 +47,15 @@ import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.activity.compose.rememberLauncherForActivityResult
+import com.example.eev3.viewmodel.MusicViewModel.ImportMode
+import androidx.compose.material3.ExperimentalMaterial3Api
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalFoundationApi::class, 
+    ExperimentalMaterialApi::class,
+    ExperimentalMaterial3Api::class
+)
 @Composable
 fun MusicPlayerApp(
     viewModel: MusicViewModel = viewModel(
@@ -50,6 +63,18 @@ fun MusicPlayerApp(
     ),
     onBackPressed: () -> Unit
 ) {
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument()
+    ) { uri ->
+        uri?.let { viewModel.exportFavorites(it) }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.importFavoritesPreview(it) }
+    }
+
     var searchQuery by remember { mutableStateOf("") }
     var currentSong by remember { mutableStateOf<Song?>(null) }
     var showPlayer by remember { mutableStateOf(false) }
@@ -196,6 +221,35 @@ fun MusicPlayerApp(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // 在收藏页面显���入导出按钮
+                                    if (currentPage == 0) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                exportLauncher.launch("favorites.json")
+                                            },
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text(
+                                                "导出",
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                importLauncher.launch(arrayOf("application/json"))
+                                            },
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text(
+                                                "导入",
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
+                                    }
                                     Text(
                                         text = "缓存: ${viewModel.formatCacheSize(cacheSize)}",
                                         style = MaterialTheme.typography.bodyMedium
@@ -536,7 +590,7 @@ fun MusicPlayerApp(
             title = { Text("清除缓存") },
             text = { 
                 Text(
-                    "确定要清除所有缓存的音乐文件吗？\n当前缓存大小: ${viewModel.formatCacheSize(cacheSize)}"
+                    "确定要清除所有缓存的音乐文件吗？\n当前缓存小: ${viewModel.formatCacheSize(cacheSize)}"
                 )
             },
             confirmButton = {
@@ -573,10 +627,52 @@ fun MusicPlayerApp(
             viewModel.clearDownloadTip()
         }
     }
+
+    // 在 MusicPlayerApp 的 Composable 函数中添加状态收集
+    val showImportDialog by viewModel.showImportDialog.collectAsStateWithLifecycle(null)
+
+    // 添加导入确认对话框
+    if (showImportDialog != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelImport() },
+            title = { Text("导入收藏") },
+            text = {
+                Column {
+                    Text("发现 ${showImportDialog?.size} 首歌曲，请选择导入方式：")
+                    Text(
+                        "覆盖：清空当前收藏列表后导入\n合并：保留当前收藏并添加新歌曲",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(
+                        onClick = { viewModel.confirmImport(ImportMode.OVERRIDE) }
+                    ) {
+                        Text("覆盖")
+                    }
+                    TextButton(
+                        onClick = { viewModel.confirmImport(ImportMode.MERGE) }
+                    ) {
+                        Text("合并")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelImport() }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 // 添加榜单页面组件
-@OptIn(ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun RankListPage(
     songs: List<ObservableSong>,
